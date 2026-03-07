@@ -1,0 +1,203 @@
+// Configuración básica
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- AUTENTICACIÓN Y ROLES ---
+
+enum Role {
+  ADMIN       // Gestiona stock, recetas y usuarios
+  TRABAJADOR  // Atiende local y cocina
+  DELIVERY    // Solo ve pedidos para repartir
+  CLIENTE     // (Opcional) para ver menú o estado
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  nombre    String
+  role      Role     @default(TRABAJADOR)
+  pedidos   Pedido[] @relation("RepartidorPedidos") // Para el rol DELIVERY
+  createdAt DateTime @default(now())
+}
+
+// --- GESTIÓN DE STOCK (INSUMOS) ---
+
+model Insumo {
+  id           String           @id @default(uuid())
+  nombre       String
+  stockActual  Float            @default(0)
+  stockMinimo  Float            @default(5)
+  unidadMedida String
+  recetas      ProductoReceta[]
+  activo       Boolean          @default(true)
+
+  // ✅ NUEVO: proveedor opcional
+  proveedorId  String?
+  proveedor    Proveedor?       @relation(fields: [proveedorId], references: [id])
+
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+model Proveedor {
+  id        String   @id @default(uuid())
+  nombre    String   @unique
+  telefono  String?
+  email     String?
+  notas     String?
+  activo    Boolean  @default(true)
+
+  // ✅ un proveedor tiene muchos insumos
+  insumos   Insumo[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// --- CATEGORIAS DE LOS PRODUCTOS ---
+model Categoria {
+  id          String    @id @default(uuid())
+  nombre      String    @unique
+  descripcion String?
+  activo      Boolean   @default(true)
+  productos   Producto[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// --- PRODUCTOS Y RECETAS DINÁMICAS ---
+
+model Producto {
+  id          String            @id @default(uuid())
+  nombre      String            // Ej: "Hamburguesa Cuádruple"
+  precio      Float
+  esParaVenta Boolean           @default(true)
+  activo      Boolean           @default(true)
+  descripcion           String?
+  codigo                String?  @unique
+  tiempoPreparacionMin  Int?
+  categoriaId String?
+  categoria   Categoria? @relation(fields: [categoriaId], references: [id])
+  receta      ProductoReceta[]
+  detalles    PedidoDetalle[]
+}
+
+// Tabla intermedia para la "Receta" (Escandallo)
+model ProductoReceta {
+  id          String   @id @default(uuid())
+  productoId  String
+  insumoId    String
+  cantidad    Float    // Ej: 4 (para 4 medallones)
+  
+  producto    Producto @relation(fields: [productoId], references: [id])
+  insumo      Insumo   @relation(fields: [insumoId], references: [id])
+}
+
+// --- SALÓN Y MESAS ---
+
+// model Mesa {
+//   id           String   @id @default(uuid())
+//   numero       Int      @unique
+//   estado       String   @default("LIBRE") // LIBRE, OCUPADA, PIDIO_CUENTA, SUCIA
+//   posX       Int      @default(0) // Columna en la grilla (0-14)
+//   posY       Int      @default(0) // Fila en la grilla (0-14)
+//   capacidad    Int      @default(4)
+//   cliente      String?  // Nombre del cliente actual
+//   comensales   Int      @default(0)
+//   createdAt    DateTime @default(now())
+//   updatedAt    DateTime @updatedAt
+//   pedidos      Pedido[]
+// }
+
+// --- PEDIDOS Y DELIVERY ---
+
+
+enum TipoPedido {
+  LOCAL
+  DELIVERY
+  RETIRO
+}
+
+enum EstadoPedido {
+  PENDIENTE
+  EN_CAMINO
+  ENTREGADO
+  CANCELADO
+}
+
+enum MetodoPago {
+  EFECTIVO
+  TRANSFERENCIA
+  TARJETA
+}
+
+model Pedido {
+  id                String       @id @default(uuid())
+  tipo              TipoPedido   @default(LOCAL)
+  estado            EstadoPedido @default(PENDIENTE)
+  total             Float        @default(0)
+  
+  nombreCliente     String?
+  numeroCliente     String?
+  metodoPago        MetodoPago?
+
+  direccion         String?
+  motivoCancelacion String?
+  canceladoPor      Role?
+
+  repartidorId      String?
+  repartidor        User?        @relation("RepartidorPedidos", fields: [repartidorId], references: [id])
+
+  detalles          PedidoDetalle[]
+  createdAt         DateTime     @default(now())
+}
+
+model PedidoDetalle {
+  id         String   @id @default(uuid())
+  pedidoId   String
+  productoId String
+  cantidad   Int
+  aderezos   Aderezo[]
+  
+  // ✅ PRECIO EDITABLE: El que se pone en el POS (ej: precio amigo)
+  precioUnitario Float @default(0)
+  
+  // ✅ EXTRAS: Guardamos qué extras se eligieron en este producto
+  // Guardamos un JSON para saber cuáles fueron gratis y cuáles se cobraron
+  // Formato: [{id: "uuid", nombre: "Panceta", precio: 500, cobrado: true}]
+  extras     Json?    
+
+  subtotal   Float    // (precioUnitario * cantidad) + sumatoria de extras cobrados
+  notas      String?  
+
+  pedido     Pedido   @relation(fields: [pedidoId], references: [id])
+  producto   Producto @relation(fields: [productoId], references: [id])
+
+}
+
+// --- GESTIÓN DE EXTRAS ---
+
+model Extra {
+  id          String   @id @default(uuid())
+  nombre      String   @unique
+  precio      Float    @default(500)   // precio por unidadMedida
+  unidadMedida String  @default("un")  // un | sobre | ml | gr | etc
+  stockActual Float    @default(0)
+  activo      Boolean  @default(true)
+  categoria   String   @default("ADEREZOS")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Aderezo {
+  id     String @id @default(uuid())
+  nombre String @unique
+  detalles PedidoDetalle[]
+}

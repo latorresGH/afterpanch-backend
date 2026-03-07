@@ -1,0 +1,25 @@
+import { IsBoolean, IsNumber, IsOptional, IsString, Min } from "class-validator";
+
+export class UpdateExtraDto {
+  @IsOptional()
+  @IsString()
+  nombre?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  precio?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  stockActual?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  activo?: boolean;
+
+  @IsOptional()
+  @IsString()
+  categoria?: string;
+}

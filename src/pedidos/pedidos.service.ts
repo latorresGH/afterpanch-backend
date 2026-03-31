@@ -2,24 +2,27 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
-} from "@nestjs/common";
-import { PrismaService } from "src/prisma/prisma.service";
-import { CreatePedidoDto, TipoPedidoDto } from "./dto/create-pedido.dto";
-import { EstadoPedido, Prisma, Role, MetodoPago } from "@prisma/client";
+} from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { CreatePedidoDto, TipoPedidoDto } from './dto/create-pedido.dto';
+import { EstadoPedido, Prisma, Role, MetodoPago } from '@prisma/client';
+import { OfertasCalculatorService } from '../ofertas/ofertas-calculator.service';
 
 const ESTADOS_ABIERTOS: EstadoPedido[] = [
   EstadoPedido.PENDIENTE,
   EstadoPedido.EN_CAMINO,
 ];
 
-// regla: primeros 3 extras gratis por línea (y del 4to en adelante se cobran)
 const LIMITE_EXTRAS_GRATIS = 3;
 
 @Injectable()
 export class PedidosService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private ofertasCalculator: OfertasCalculatorService,
+  ) {}
 
-async crearPedido(dto: CreatePedidoDto) {
+  async crearPedido(dto: CreatePedidoDto) {
     const {
       tipo,
       direccion,
@@ -31,18 +34,23 @@ async crearPedido(dto: CreatePedidoDto) {
     } = dto;
 
     if (!detalles || detalles.length === 0) {
-      throw new BadRequestException("El pedido no tiene productos");
+      throw new BadRequestException('El pedido no tiene productos');
     }
 
     if (tipo === TipoPedidoDto.DELIVERY && (!direccion || !direccion.trim())) {
-      throw new BadRequestException("La dirección es obligatoria para DELIVERY");
+      throw new BadRequestException(
+        'La dirección es obligatoria para DELIVERY',
+      );
     }
 
     const nombreClienteLimpio = nombreCliente?.trim() || null;
     const numeroClienteLimpio = numeroCliente?.trim() || null;
 
-    if (!pedidoId && (!nombreClienteLimpio || nombreClienteLimpio.length === 0)) {
-      throw new BadRequestException("nombreCliente es obligatorio");
+    if (
+      !pedidoId &&
+      (!nombreClienteLimpio || nombreClienteLimpio.length === 0)
+    ) {
+      throw new BadRequestException('nombreCliente es obligatorio');
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -58,29 +66,45 @@ async crearPedido(dto: CreatePedidoDto) {
       const prodMap = new Map(
         productos.map((p) => [
           p.id,
-          { precio: Number(p.precio), activo: Boolean(p.activo), nombre: p.nombre },
+          {
+            precio: Number(p.precio),
+            activo: Boolean(p.activo),
+            nombre: p.nombre,
+          },
         ]),
       );
 
       for (const pid of productoIds) {
-        if (!prodMap.has(pid)) throw new BadRequestException(`Producto no encontrado: ${pid}`);
-        if (prodMap.get(pid)!.activo === false) throw new BadRequestException(`Producto inactivo: ${pid}`);
+        if (!prodMap.has(pid))
+          throw new BadRequestException(`Producto no encontrado: ${pid}`);
+        if (prodMap.get(pid)!.activo === false)
+          throw new BadRequestException(`Producto inactivo: ${pid}`);
       }
 
       // -----------------------------
       // 2) Traer extras y Validar Aderezos
       // -----------------------------
-      const extraIds = detalles.flatMap((d) => (d as any).extras ?? []).map((e: any) => e.extraId);
+      const extraIds = detalles
+        .flatMap((d) => (d as any).extras ?? [])
+        .map((e: any) => e.extraId);
       const extrasUnicos = Array.from(new Set(extraIds));
-      
+
       const extrasDb = extrasUnicos.length
         ? await tx.extra.findMany({
             where: { id: { in: extrasUnicos } },
-            select: { id: true, nombre: true, precio: true, stockActual: true, activo: true },
+            select: {
+              id: true,
+              nombre: true,
+              precio: true,
+              stockActual: true,
+              activo: true,
+            },
           })
         : [];
 
-      const extraMap = new Map(extrasDb.map((e) => [e.id, { ...e, precio: Number(e.precio) }]));
+      const extraMap = new Map(
+        extrasDb.map((e) => [e.id, { ...e, precio: Number(e.precio) }]),
+      );
 
       // Validar Aderezos (NUEVO)
       const todosLosAderezosIds = detalles
@@ -93,7 +117,7 @@ async crearPedido(dto: CreatePedidoDto) {
           select: { id: true },
         });
         if (aderezosExistentes.length !== new Set(todosLosAderezosIds).size) {
-          throw new BadRequestException("Uno o más aderezos no existen");
+          throw new BadRequestException('Uno o más aderezos no existen');
         }
       }
 
@@ -118,14 +142,21 @@ async crearPedido(dto: CreatePedidoDto) {
         let extrasCobradoTotal = 0;
         const extrasJsonArr: any[] = [];
         const expanded: string[] = [];
-        extrasNorm.forEach(e => { for(let i=0; i<e.cantidad; i++) expanded.push(e.extraId) });
+        extrasNorm.forEach((e) => {
+          for (let i = 0; i < e.cantidad; i++) expanded.push(e.extraId);
+        });
 
         for (let idx = 0; idx < expanded.length; idx++) {
           const ex = extraMap.get(expanded[idx])!;
           const cobrado = idx >= LIMITE_EXTRAS_GRATIS;
           const precioExtra = cobrado ? ex.precio : 0;
           extrasCobradoTotal += precioExtra;
-          extrasJsonArr.push({ id: ex.id, nombre: ex.nombre, precio: ex.precio, cobrado });
+          extrasJsonArr.push({
+            id: ex.id,
+            nombre: ex.nombre,
+            precio: ex.precio,
+            cobrado,
+          });
         }
 
         // Descuento stock extras
@@ -142,8 +173,9 @@ async crearPedido(dto: CreatePedidoDto) {
         const extrasJson: Prisma.InputJsonValue | undefined =
           extrasJsonArr.length > 0 ? (extrasJsonArr as any) : undefined;
 
-        // Aderezos IDs de esta línea (NUEVO)
-        const aderezosIds: string[] = Array.isArray(d.aderezosIds) ? d.aderezosIds : [];
+        const aderezosIds: string[] = Array.isArray(d.aderezosIds)
+          ? d.aderezosIds
+          : [];
 
         detallesCreate.push({
           cantidad,
@@ -152,167 +184,146 @@ async crearPedido(dto: CreatePedidoDto) {
           subtotal,
           notas: d.notas?.trim?.() || null,
           producto: { connect: { id: d.productoId } },
-          // Relación Many-to-Many con Aderezos (NUEVO)
-          aderezos: aderezosIds.length > 0 
-            ? { connect: aderezosIds.map(id => ({ id })) } 
-            : undefined,
+          aderezos:
+            aderezosIds.length > 0
+              ? { connect: aderezosIds.map((id) => ({ id })) }
+              : undefined,
         });
       }
+
+      const lineasParaCalcular = detalles.map((d: any) => ({
+        productoId: d.productoId,
+        cantidad: d.cantidad,
+        precioUnitario: d.precioUnitario ?? prodMap.get(d.productoId)!.precio,
+        extras: (d.extras || []).map((e: any) => ({
+          extraId: e.extraId,
+          cantidad: e.cantidad ?? 1,
+          precio: extraMap.get(e.extraId)?.precio || 0,
+        })),
+      }));
+
+      const calculoOfertas =
+        await this.ofertasCalculator.calcularTotal(lineasParaCalcular);
+
+      const totalConOfertas = totalNuevosItems - calculoOfertas.descuento;
 
       // -----------------------------
       // 4) Anexar o crear
       // -----------------------------
       const includeConfig = {
-        detalles: { 
-          include: { 
+        detalles: {
+          include: {
             producto: true,
-            aderezos: true // <-- Incluimos aderezos en la respuesta
-          } 
+            aderezos: true, // <-- Incluimos aderezos en la respuesta
+          },
         },
       };
 
       if (pedidoId) {
         const pedido = await tx.pedido.findUnique({
           where: { id: pedidoId },
-          select: { id: true, estado: true, nombreCliente: true, numeroCliente: true, metodoPago: true },
+          select: {
+            id: true,
+            estado: true,
+            nombreCliente: true,
+            numeroCliente: true,
+            metodoPago: true,
+          },
         });
 
-        if (!pedido) throw new NotFoundException("Pedido no encontrado");
-        if (!ESTADOS_ABIERTOS.includes(pedido.estado)) throw new BadRequestException("Pedido cerrado");
+        if (!pedido) throw new NotFoundException('Pedido no encontrado');
+        if (!ESTADOS_ABIERTOS.includes(pedido.estado))
+          throw new BadRequestException('Pedido cerrado');
 
-        return tx.pedido.update({
+        const pedidoActualizado = await tx.pedido.update({
           where: { id: pedidoId },
           data: {
-            total: { increment: totalNuevosItems },
+            total: { increment: totalConOfertas },
             detalles: { create: detallesCreate },
-            ...(!pedido.nombreCliente && nombreClienteLimpio ? { nombreCliente: nombreClienteLimpio } : {}),
-            ...(!pedido.numeroCliente && numeroClienteLimpio ? { numeroCliente: numeroClienteLimpio } : {}),
-            ...(!pedido.metodoPago && metodoPago ? { metodoPago: metodoPago as MetodoPago } : {}),
+            ...(!pedido.nombreCliente && nombreClienteLimpio
+              ? { nombreCliente: nombreClienteLimpio }
+              : {}),
+            ...(!pedido.numeroCliente && numeroClienteLimpio
+              ? { numeroCliente: numeroClienteLimpio }
+              : {}),
+            ...(!pedido.metodoPago && metodoPago
+              ? { metodoPago: metodoPago as MetodoPago }
+              : {}),
           },
           include: includeConfig,
         });
+
+        if (calculoOfertas.ofertasAplicadas.length > 0) {
+          for (const ofertaAplicada of calculoOfertas.ofertasAplicadas) {
+            await tx.pedidoOferta.create({
+              data: {
+                pedidoId: pedidoActualizado.id,
+                ofertaId: ofertaAplicada.ofertaId,
+                precioOriginal: calculoOfertas.subtotal,
+                precioFinal: calculoOfertas.total,
+                descuentoAplicado: ofertaAplicada.descuento,
+              },
+            });
+            await tx.oferta.update({
+              where: { id: ofertaAplicada.ofertaId },
+              data: { usosActuales: { increment: 1 } },
+            });
+          }
+        }
+
+        return pedidoActualizado;
       }
 
-      return tx.pedido.create({
+      const pedidoNuevo = await tx.pedido.create({
         data: {
           tipo,
           nombreCliente: nombreClienteLimpio!,
           numeroCliente: numeroClienteLimpio,
           metodoPago: (metodoPago as MetodoPago) ?? null,
           direccion: tipo === TipoPedidoDto.DELIVERY ? direccion!.trim() : null,
-          total: totalNuevosItems,
+          total: totalConOfertas,
           estado: EstadoPedido.PENDIENTE,
           detalles: { create: detallesCreate },
         },
         include: includeConfig,
       });
+
+      if (calculoOfertas.ofertasAplicadas.length > 0) {
+        for (const ofertaAplicada of calculoOfertas.ofertasAplicadas) {
+          await tx.pedidoOferta.create({
+            data: {
+              pedidoId: pedidoNuevo.id,
+              ofertaId: ofertaAplicada.ofertaId,
+              precioOriginal: calculoOfertas.subtotal,
+              precioFinal: calculoOfertas.total,
+              descuentoAplicado: ofertaAplicada.descuento,
+            },
+          });
+          await tx.oferta.update({
+            where: { id: ofertaAplicada.ofertaId },
+            data: { usosActuales: { increment: 1 } },
+          });
+        }
+      }
+
+      return pedidoNuevo;
     });
   }
 
-  /**
-   * ✅ Procesa extras:
-   * - valida activos y stock
-   * - descuenta stock (siempre, aunque sea gratis)
-   * - aplica regla "3 gratis por línea" (se cobra desde el 4to extra)
-   *
-   * Regla de conteo: cada extra elegido cuenta 1, sin importar su cantidad.
-   * Cobro: extra.precio * cantidad (cantidad default=1)
-   */
-  private async processExtras(
-    tx: Prisma.TransactionClient,
-    extrasDto: Array<{ extraId: string; cantidad?: number }>,
-  ): Promise<{ extrasJson: any[] | null; extrasCobradoTotal: number }> {
-    if (!extrasDto || extrasDto.length === 0) {
-      return { extrasJson: null, extrasCobradoTotal: 0 };
-    }
-
-    // normalizar cantidad
-    const normalized = extrasDto.map((e) => ({
-      extraId: e.extraId,
-      cantidad: e.cantidad === undefined || e.cantidad === null ? 1 : Number(e.cantidad),
-    }));
-
-    for (const e of normalized) {
-      if (!e.extraId) throw new BadRequestException("extraId inválido");
-      if (!Number.isFinite(e.cantidad) || e.cantidad <= 0) {
-        throw new BadRequestException("cantidad de extra inválida");
-      }
-    }
-
-    const extraIds = normalized.map((e) => e.extraId);
-
-    const extrasDb = await tx.extra.findMany({
-      where: { id: { in: extraIds } },
-      select: { id: true, nombre: true, precio: true, stockActual: true, activo: true, unidadMedida: true },
-    });
-
-    const dbMap = new Map(extrasDb.map((x) => [x.id, x]));
-
-    // validar existencia/activo/stock por cada extra en orden DTO
-    for (const e of normalized) {
-      const x = dbMap.get(e.extraId);
-      if (!x) throw new BadRequestException(`Extra no encontrado: ${e.extraId}`);
-      if (!x.activo) throw new BadRequestException(`Extra inactivo: ${x.nombre}`);
-
-      const stock = Number(x.stockActual);
-      if (!Number.isFinite(stock)) throw new BadRequestException(`Stock inválido en extra: ${x.nombre}`);
-      if (stock < e.cantidad) {
-        throw new BadRequestException(
-          `No hay stock suficiente de "${x.nombre}" (stock: ${stock}, requerido: ${e.cantidad})`,
-        );
-      }
-    }
-
-    // regla 3 gratis por línea (por cantidad de items)
-    let extrasCobradoTotal = 0;
-
-    const extrasJson = normalized.map((e, idx) => {
-      const x = dbMap.get(e.extraId)!;
-
-      const cobrado = idx >= LIMITE_EXTRAS_GRATIS;
-      const precioUnit = Number(x.precio);
-      const costo = cobrado ? precioUnit * e.cantidad : 0;
-
-      if (cobrado) extrasCobradoTotal += costo;
-
-      return {
-        id: x.id,
-        nombre: x.nombre,
-        unidadMedida: x.unidadMedida ?? "un",
-        cantidad: e.cantidad,
-        precioUnitario: precioUnit,
-        cobrado,
-        costo,
-      };
-    });
-
-    // descontar stock SIEMPRE (gratis o cobrado)
-    // (si el mismo extra se repite 2 veces en el array, esto lo descuenta 2 veces; si no querés eso, lo agregamos como regla)
-    for (const e of normalized) {
-      await tx.extra.update({
-        where: { id: e.extraId },
-        data: { stockActual: { decrement: e.cantidad } },
-      });
-    }
-
-    return { extrasJson, extrasCobradoTotal };
-  }
-  
-
-async listarTodos() {
-  return this.prisma.pedido.findMany({
-    include: {
-      detalles: { 
-        include: { 
-          producto: true,
-          aderezos: true // <--- ACÁ: Para que traiga los nombres de los aderezos de cada producto
-        } 
+  async listarTodos() {
+    return this.prisma.pedido.findMany({
+      include: {
+        detalles: {
+          include: {
+            producto: true,
+            aderezos: true,
+          },
+        },
+        repartidor: { select: { nombre: true, role: true } },
       },
-      repartidor: { select: { nombre: true, role: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
-}
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 
   async listarDeliveryPendientes() {
     return this.prisma.pedido.findMany({
@@ -343,7 +354,9 @@ async listarTodos() {
       pedidoExistente.estado === EstadoPedido.ENTREGADO ||
       pedidoExistente.estado === EstadoPedido.CANCELADO
     ) {
-      throw new BadRequestException('No se puede cambiar estado de un pedido cerrado');
+      throw new BadRequestException(
+        'No se puede cambiar estado de un pedido cerrado',
+      );
     }
 
     return this.prisma.pedido.update({
@@ -365,7 +378,9 @@ async listarTodos() {
       throw new BadRequestException('El pedido ya está entregado');
     }
     if (pedido.estado === EstadoPedido.CANCELADO) {
-      throw new BadRequestException('No se puede finalizar un pedido cancelado');
+      throw new BadRequestException(
+        'No se puede finalizar un pedido cancelado',
+      );
     }
 
     return this.prisma.pedido.update({
@@ -403,28 +418,30 @@ async listarTodos() {
   }
 
   async setPago(id: string, dto: { metodoPago?: any; numeroCliente?: any }) {
-  const pedido = await this.prisma.pedido.findUnique({
-    where: { id },
-    select: { id: true, estado: true },
-  });
-  if (!pedido) throw new NotFoundException("Pedido no encontrado");
+    const pedido = await this.prisma.pedido.findUnique({
+      where: { id },
+      select: { id: true, estado: true },
+    });
+    if (!pedido) throw new NotFoundException('Pedido no encontrado');
 
-  if (
-    pedido.estado === EstadoPedido.ENTREGADO ||
-    pedido.estado === EstadoPedido.CANCELADO
-  ) {
-    throw new BadRequestException("No se puede cambiar pago de un pedido cerrado");
+    if (
+      pedido.estado === EstadoPedido.ENTREGADO ||
+      pedido.estado === EstadoPedido.CANCELADO
+    ) {
+      throw new BadRequestException(
+        'No se puede cambiar pago de un pedido cerrado',
+      );
+    }
+
+    return this.prisma.pedido.update({
+      where: { id },
+      data: {
+        metodoPago: dto.metodoPago === undefined ? undefined : dto.metodoPago,
+        numeroCliente:
+          dto.numeroCliente === undefined
+            ? undefined
+            : dto.numeroCliente?.trim?.() || null,
+      },
+    });
   }
-
-  return this.prisma.pedido.update({
-    where: { id },
-    data: {
-      metodoPago: dto.metodoPago === undefined ? undefined : dto.metodoPago,
-      numeroCliente:
-        dto.numeroCliente === undefined ? undefined : (dto.numeroCliente?.trim?.() || null),
-    },
-  });
 }
-}
-
-

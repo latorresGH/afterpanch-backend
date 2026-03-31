@@ -74,18 +74,20 @@ model Categoria {
 // --- PRODUCTOS Y RECETAS DINÁMICAS ---
 
 model Producto {
-  id          String            @id @default(uuid())
-  nombre      String            // Ej: "Hamburguesa Cuádruple"
-  precio      Float
-  esParaVenta Boolean           @default(true)
-  activo      Boolean           @default(true)
-  descripcion           String?
-  codigo                String?  @unique
-  tiempoPreparacionMin  Int?
-  categoriaId String?
-  categoria   Categoria? @relation(fields: [categoriaId], references: [id])
-  receta      ProductoReceta[]
-  detalles    PedidoDetalle[]
+  id                String            @id @default(uuid())
+  nombre            String // Ej: "Hamburguesa Cuádruple"
+  precio            Float
+  esParaVenta       Boolean           @default(true)
+  activo            Boolean           @default(true)
+  descripcion       String?
+  codigo            String?           @unique
+  tiempoPreparacionMin Int?
+  categoriaId       String?
+  categoria         Categoria?        @relation(fields: [categoriaId], references: [id])
+  receta            ProductoReceta[]
+  detalles          PedidoDetalle[]
+  ofertaProductos   OfertaProducto[]
+  grupoOpciones     GrupoOpcion[]
 }
 
 // Tabla intermedia para la "Receta" (Escandallo)
@@ -138,11 +140,11 @@ enum MetodoPago {
 }
 
 model Pedido {
-  id                String       @id @default(uuid())
-  tipo              TipoPedido   @default(LOCAL)
-  estado            EstadoPedido @default(PENDIENTE)
-  total             Float        @default(0)
-  
+  id                String          @id @default(uuid())
+  tipo              TipoPedido      @default(LOCAL)
+  estado            EstadoPedido    @default(PENDIENTE)
+  total             Float           @default(0)
+
   nombreCliente     String?
   numeroCliente     String?
   metodoPago        MetodoPago?
@@ -152,33 +154,30 @@ model Pedido {
   canceladoPor      Role?
 
   repartidorId      String?
-  repartidor        User?        @relation("RepartidorPedidos", fields: [repartidorId], references: [id])
+  repartidor        User?           @relation("RepartidorPedidos", fields: [repartidorId], references: [id])
 
   detalles          PedidoDetalle[]
-  createdAt         DateTime     @default(now())
+  ofertasAplicadas  PedidoOferta[]
+  createdAt         DateTime        @default(now())
 }
 
 model PedidoDetalle {
-  id         String   @id @default(uuid())
-  pedidoId   String
-  productoId String
-  cantidad   Int
-  aderezos   Aderezo[]
-  
-  // ✅ PRECIO EDITABLE: El que se pone en el POS (ej: precio amigo)
-  precioUnitario Float @default(0)
-  
-  // ✅ EXTRAS: Guardamos qué extras se eligieron en este producto
-  // Guardamos un JSON para saber cuáles fueron gratis y cuáles se cobraron
-  // Formato: [{id: "uuid", nombre: "Panceta", precio: 500, cobrado: true}]
-  extras     Json?    
+  id            String        @id @default(uuid())
+  pedidoId      String
+  productoId    String
+  cantidad      Int
+  aderezos      Aderezo[]
 
-  subtotal   Float    // (precioUnitario * cantidad) + sumatoria de extras cobrados
-  notas      String?  
+  precioUnitario Float       @default(0)
 
-  pedido     Pedido   @relation(fields: [pedidoId], references: [id])
-  producto   Producto @relation(fields: [productoId], references: [id])
+  extras        Json?
 
+  subtotal      Float
+  notas         String?
+
+  pedido        Pedido       @relation(fields: [pedidoId], references: [id])
+  producto      Producto     @relation(fields: [productoId], references: [id])
+  ofertaAplicada PedidoOferta[]
 }
 
 // --- GESTIÓN DE EXTRAS ---
@@ -197,7 +196,114 @@ model Extra {
 }
 
 model Aderezo {
-  id     String @id @default(uuid())
-  nombre String @unique
-  detalles PedidoDetalle[]
+  id        String          @id @default(uuid())
+  nombre    String          @unique
+  detalles  PedidoDetalle[]
+}
+
+// ============================================
+// SISTEMA DE OFERTAS
+// ============================================
+
+enum TipoOferta {
+  DOS_POR_UNO
+  COMBO
+  DESCUENTO_PORCENTAJE
+  DESCUENTO_MONTO_FIJO
+}
+
+enum EstadoOferta {
+  ACTIVA
+  PAUSADA
+  VENCIDA
+}
+
+model Oferta {
+  id                  String          @id @default(uuid())
+  nombre              String
+  descripcion         String?
+  tipo                TipoOferta
+  estado              EstadoOferta    @default(ACTIVA)
+
+  fechaInicio         DateTime
+  fechaFin            DateTime?
+  activa              Boolean         @default(true)
+
+  porcentajeDescuento Float?
+  montoDescuento      Float?
+
+  maxUsosPorCliente   Int?
+  maxUsosTotales      Int?
+  usosActuales        Int             @default(0)
+
+  diasAplicables      String          @default("1,2,3,4,5,6,7")
+  horaInicio          String?
+  horaFin             String?
+
+  aplicaPorLinea      Boolean         @default(true)
+
+  productos           OfertaProducto[]
+  gruposCombo         GrupoCombo[]
+  pedidosAplicados    PedidoOferta[]
+
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@index([activa, estado])
+  @@index([fechaInicio, fechaFin])
+}
+
+model OfertaProducto {
+  id            String    @id @default(uuid())
+  ofertaId      String
+  productoId    String
+  obligatorio   Boolean   @default(false)
+  cantidadMin   Int       @default(1)
+  cantidadMax   Int?
+  precioEspecial Float?
+
+  oferta        Oferta    @relation(fields: [ofertaId], references: [id], onDelete: Cascade)
+  producto      Producto  @relation(fields: [productoId], references: [id])
+
+  @@unique([ofertaId, productoId])
+}
+
+model GrupoCombo {
+  id            String        @id @default(uuid())
+  ofertaId      String
+  nombre        String
+  obligatorio   Boolean       @default(true)
+  cantidad      Int           @default(1)
+
+  oferta        Oferta        @relation(fields: [ofertaId], references: [id], onDelete: Cascade)
+  opciones      GrupoOpcion[]
+}
+
+model GrupoOpcion {
+  id            String      @id @default(uuid())
+  grupoComboId  String
+  productoId    String
+
+  grupoCombo    GrupoCombo  @relation(fields: [grupoComboId], references: [id], onDelete: Cascade)
+  producto      Producto    @relation(fields: [productoId], references: [id])
+
+  @@unique([grupoComboId, productoId])
+}
+
+model PedidoOferta {
+  id                String        @id @default(uuid())
+  pedidoId          String
+  ofertaId          String
+  pedidoDetalleId   String?       @unique
+
+  precioOriginal    Float
+  precioFinal       Float
+  descuentoAplicado Float
+
+  pedido            Pedido        @relation(fields: [pedidoId], references: [id])
+  oferta            Oferta        @relation(fields: [ofertaId], references: [id])
+  pedidoDetalle     PedidoDetalle? @relation(fields: [pedidoDetalleId], references: [id])
+
+  @@index([pedidoId])
+  @@index([ofertaId])
 }

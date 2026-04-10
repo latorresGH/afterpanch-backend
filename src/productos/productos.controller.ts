@@ -22,11 +22,11 @@ import { CreateProductoDto } from './dto/create-producto.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { Public } from '../auth/public.decorator';
 
 @ApiTags('Productos')
 @ApiBearerAuth()
 @Controller('productos')
-@UseGuards(JwtAuthGuard)
 export class ProductosController {
   constructor(private readonly productosService: ProductosService) {}
 
@@ -43,12 +43,12 @@ export class ProductosController {
   }
 
   @Get()
+  @Public()
   @ApiOperation({
     summary: 'Listar productos',
     description:
       'Obtiene todos los productos con su receta. Use incluirInactivos=true para ver todos.',
   })
-  @Roles(Role.ADMIN, Role.TRABAJADOR)
   obtenerTodos(@Query('incluirInactivos') incluirInactivos?: string) {
     return this.productosService.obtenerMenu(incluirInactivos === 'true');
   }

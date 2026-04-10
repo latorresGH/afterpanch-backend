@@ -7,20 +7,17 @@ import {
   Body,
   Param,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import { OfertasService } from './ofertas.service';
 import { OfertasCalculatorService } from './ofertas-calculator.service';
 import { CreateOfertaDto } from './dto/create-oferta.dto';
 import { UpdateOfertaDto } from './dto/update-oferta.dto';
 import { PreviewOfertaDto } from './dto/preview-oferta.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { Public } from '../auth/public.decorator';
 
 @Controller('ofertas')
-@UseGuards(JwtAuthGuard, RolesGuard)
 export class OfertasController {
   constructor(
     private ofertasService: OfertasService,
@@ -34,7 +31,7 @@ export class OfertasController {
   }
 
   @Get()
-  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @Public()
   listar(@Query('activas') activas?: string) {
     return this.ofertasService.findAll(activas === 'true');
   }
@@ -64,7 +61,7 @@ export class OfertasController {
   }
 
   @Post('calcular')
-  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @Public()
   async previsualizar(@Body() dto: PreviewOfertaDto) {
     return this.calculatorService.calcularTotal(
       dto.lineas.map((l) => ({

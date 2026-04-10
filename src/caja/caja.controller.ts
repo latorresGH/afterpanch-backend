@@ -5,7 +5,6 @@ import {
   Param,
   Body,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -14,10 +13,8 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { CajaService } from './caja.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { Role, TipoMovimientoCaja } from '@prisma/client';
+import { Role } from '@prisma/client';
 import {
   ConfirmarPagoDto,
   MovimientoManualDto,
@@ -26,7 +23,6 @@ import {
 @ApiTags('Caja')
 @ApiBearerAuth()
 @Controller('caja')
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN, Role.TRABAJADOR)
 export class CajaController {
   constructor(private readonly cajaService: CajaService) {}

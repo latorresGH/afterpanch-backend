@@ -21,11 +21,11 @@ import { SetPrecioCategoriaDto } from './dto/set-precio-categoria.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { Public } from '../auth/public.decorator';
 
 @ApiTags('Aderezos/Salsas')
 @ApiBearerAuth()
 @Controller('aderezos')
-@UseGuards(JwtAuthGuard)
 export class AderezosController {
   constructor(private readonly aderezosService: AderezosService) {}
 
@@ -52,7 +52,7 @@ export class AderezosController {
   }
 
   @Get()
-  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @Public()
   @ApiOperation({
     summary: 'Listar aderezos',
     description: 'Obtiene todos los aderezos con sus precios por categoría.',

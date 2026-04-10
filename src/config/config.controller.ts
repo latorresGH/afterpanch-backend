@@ -4,6 +4,7 @@ import { NegocioConfigService } from './config.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { Public } from '../auth/public.decorator';
 
 @ApiTags('Configuración')
 @Controller('config')
@@ -11,18 +12,14 @@ export class NegocioConfigController {
   constructor(private configService: NegocioConfigService) {}
 
   @Get()
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @Public()
   @ApiOperation({ summary: 'Obtener toda la configuración' })
   obtenerTodas() {
     return this.configService.obtenerTodas();
   }
 
   @Get(':clave')
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @Public()
   @ApiOperation({ summary: 'Obtener valor de configuración por clave' })
   async obtener(@Param('clave') clave: string) {
     const valor = await this.configService.obtener(clave);

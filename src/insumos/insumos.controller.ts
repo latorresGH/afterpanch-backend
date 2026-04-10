@@ -7,7 +7,6 @@ import {
   Param,
   Delete,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { InsumosService } from './insumos.service';
@@ -15,15 +14,12 @@ import { UpdateInsumoDto } from './dto/update-insumo.dto';
 import { SumarStockDto } from './dto/sumar-stock.dto';
 import { ToggleActivoDto } from './dto/toggle-activo.dto';
 import { DescontarStockDto } from './dto/descontar-stock.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { Public } from '../auth/public.decorator';
 
 @ApiTags('Insumos')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN, Role.TRABAJADOR)
 @Controller('insumos')
 export class InsumosController {
   constructor(private readonly insumosService: InsumosService) {}
@@ -52,6 +48,7 @@ export class InsumosController {
   }
 
   @Get()
+  @Public()
   @ApiOperation({
     summary: 'Listar insumos',
     description: 'Obtiene todos los insumos con su stock actual.',

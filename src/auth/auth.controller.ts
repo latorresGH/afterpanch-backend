@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards, Get, Req } from '@nestjs/common';
+import { Body, Controller, Post, Get, Req } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -9,20 +9,17 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-import { JwtAuthGuard } from './jwt-auth.guard';
 import { Roles, ROLES_KEY } from './roles.decorator';
 import { Role } from '@prisma/client';
+import { Public } from './public.decorator';
 
 @ApiTags('Autenticación')
 @Controller('auth')
 export class AuthController {
   constructor(private auth: AuthService) {}
 
-  /**
-   * Registro público - SIEMPRE crea rol CLIENTE
-   * Rate limit: 5 por minuto para prevenir spam
-   */
   @Post('register')
+  @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({
     summary: 'Registrar nuevo cliente',
@@ -44,11 +41,8 @@ export class AuthController {
     );
   }
 
-  /**
-   * Login
-   * Rate limit: 5 por minuto para prevenir fuerza bruta
-   */
   @Post('login')
+  @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({
     summary: 'Iniciar sesión',
@@ -64,11 +58,7 @@ export class AuthController {
     return this.auth.login(dto.email, dto.password);
   }
 
-  /**
-   * Crear usuario con rol específico - Solo ADMIN
-   */
   @Post('create-user')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Roles(Role.ADMIN)
   @ApiOperation({
@@ -84,7 +74,6 @@ export class AuthController {
   }
 
   @Get('me')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Obtener usuario actual' })
   @ApiResponse({ status: 200, description: 'Datos del usuario autenticado' })

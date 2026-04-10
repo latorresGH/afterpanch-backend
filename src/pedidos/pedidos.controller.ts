@@ -23,15 +23,16 @@ import { SetMetodoPagoDto } from './dto/set-metodo-pago.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles, ROLES_KEY } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { Public } from '../auth/public.decorator';
 
 @ApiTags('Pedidos')
 @ApiBearerAuth()
 @Controller('pedidos')
-@UseGuards(JwtAuthGuard)
 export class PedidosController {
   constructor(private readonly pedidosService: PedidosService) {}
 
   @Post()
+  @Public()
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({
     summary: 'Crear un nuevo pedido',
@@ -44,9 +45,8 @@ export class PedidosController {
     description: 'Datos inválidos o stock insuficiente',
   })
   @ApiResponse({ status: 429, description: 'Demasiadas solicitudes' })
-  @Roles(Role.ADMIN, Role.TRABAJADOR)
   crear(@Body() dto: CreatePedidoDto, @Request() req: any) {
-    console.log(`[PEDIDOS] Usuario ${req.user?.email} creando pedido`);
+    console.log(`[PEDIDOS] Pedido creado desde menú público`);
     return this.pedidosService.crearPedido(dto);
   }
 
@@ -73,6 +73,7 @@ export class PedidosController {
   }
 
   @Get(':id')
+  @Public()
   @ApiOperation({ summary: 'Obtener un pedido por ID' })
   findOne(@Param('id') id: string) {
     return this.pedidosService.findOne(id);

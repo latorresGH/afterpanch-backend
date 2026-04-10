@@ -16,11 +16,11 @@ import { UpdateCategoriaDto } from './dto/update-categoria.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
+import { Public } from '../auth/public.decorator';
 
 @ApiTags('Categorías')
 @ApiBearerAuth()
 @Controller('categorias')
-@UseGuards(JwtAuthGuard)
 export class CategoriasController {
   constructor(private readonly service: CategoriasService) {}
 
@@ -35,7 +35,7 @@ export class CategoriasController {
   }
 
   @Get()
-  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @Public()
   @ApiOperation({
     summary: 'Listar categorías',
     description: 'Obtiene todas las categorías activas o todas según filtro.',

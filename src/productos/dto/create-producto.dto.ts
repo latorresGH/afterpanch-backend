@@ -1,4 +1,11 @@
-import { IsArray, IsInt, IsNumber, IsOptional, IsString, Min } from "class-validator";
+import {
+  IsArray,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export class CreateProductoDto {
   @IsString()
@@ -11,13 +18,16 @@ export class CreateProductoDto {
   @IsString()
   categoriaId: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   descripcion?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   codigo?: string;
 
-  @IsOptional() @IsInt()
+  @IsOptional()
+  @IsInt()
   @Min(0)
   tiempoPreparacionMin?: number;
 

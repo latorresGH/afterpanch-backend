@@ -1,7 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { PrismaService } from "src/prisma/prisma.service";
-import { CreateCategoriaDto } from "./dto/create-categoria.dto";
-import { UpdateCategoriaDto } from "./dto/update-categoria.dto";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { CreateCategoriaDto } from './dto/create-categoria.dto';
+import { UpdateCategoriaDto } from './dto/update-categoria.dto';
 
 @Injectable()
 export class CategoriasService {
@@ -20,13 +24,13 @@ export class CategoriasService {
   async listar(incluirInactivas = false) {
     return this.prisma.categoria.findMany({
       where: incluirInactivas ? {} : { activo: true },
-      orderBy: { nombre: "asc" },
+      orderBy: { nombre: 'asc' },
     });
   }
 
   async obtener(id: string) {
     const cat = await this.prisma.categoria.findUnique({ where: { id } });
-    if (!cat) throw new NotFoundException("Categoría no encontrada");
+    if (!cat) throw new NotFoundException('Categoría no encontrada');
     return cat;
   }
 
@@ -37,7 +41,10 @@ export class CategoriasService {
       data: {
         ...dto,
         nombre: dto.nombre !== undefined ? dto.nombre.trim() : undefined,
-        descripcion: dto.descripcion !== undefined ? dto.descripcion?.trim() ?? null : undefined,
+        descripcion:
+          dto.descripcion !== undefined
+            ? (dto.descripcion?.trim() ?? null)
+            : undefined,
       },
     });
   }
@@ -59,7 +66,7 @@ export class CategoriasService {
 
     if (usados > 0) {
       throw new BadRequestException(
-        "No se puede borrar una categoría que tiene productos. Desactivala (activo=false).",
+        'No se puede borrar una categoría que tiene productos. Desactivala (activo=false).',
       );
     }
 
@@ -67,7 +74,10 @@ export class CategoriasService {
   }
 
   private async ensureExists(id: string) {
-    const exists = await this.prisma.categoria.findUnique({ where: { id }, select: { id: true } });
-    if (!exists) throw new NotFoundException("Categoría no encontrada");
+    const exists = await this.prisma.categoria.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundException('Categoría no encontrada');
   }
 }

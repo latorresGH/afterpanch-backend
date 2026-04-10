@@ -29,20 +29,23 @@ model User {
 // --- GESTIÓN DE STOCK (INSUMOS) ---
 
 model Insumo {
-  id           String           @id @default(uuid())
-  nombre       String
-  stockActual  Float            @default(0)
-  stockMinimo  Float            @default(5)
+  id String @id @default(uuid())
+  nombre String
+  stockActual Float @default(0)
+  stockMinimo Float @default(5)
   unidadMedida String
-  recetas      ProductoReceta[]
-  activo       Boolean          @default(true)
+  recetas ProductoReceta[]
+  activo Boolean @default(true)
 
   // ✅ NUEVO: proveedor opcional
-  proveedorId  String?
-  proveedor    Proveedor?       @relation(fields: [proveedorId], references: [id])
+  proveedorId String?
+  proveedor Proveedor? @relation(fields: [proveedorId], references: [id])
 
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  // ✅ NUEVO: extras que usan este insumo
+  extras Extra[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Proveedor {
@@ -62,13 +65,15 @@ model Proveedor {
 
 // --- CATEGORIAS DE LOS PRODUCTOS ---
 model Categoria {
-  id          String    @id @default(uuid())
-  nombre      String    @unique
+  id          String   @id @default(uuid())
+  nombre      String   @unique
   descripcion String?
-  activo      Boolean   @default(true)
+  activo      Boolean  @default(true)
   productos   Producto[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  preciosAderezos AderezoPrecio[]
+  preciosExtras   ExtraPrecio[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // --- PRODUCTOS Y RECETAS DINÁMICAS ---
@@ -140,65 +145,94 @@ enum MetodoPago {
 }
 
 model Pedido {
-  id                String          @id @default(uuid())
-  tipo              TipoPedido      @default(LOCAL)
-  estado            EstadoPedido    @default(PENDIENTE)
-  total             Float           @default(0)
+  id String @id @default(uuid())
+  tipo TipoPedido @default(LOCAL)
+  estado EstadoPedido @default(PENDIENTE)
+  total Float @default(0)
 
-  nombreCliente     String?
-  numeroCliente     String?
-  metodoPago        MetodoPago?
+  nombreCliente String?
+  apellidoCliente String?
+  numeroCliente String?
+  metodoPago MetodoPago?
 
-  direccion         String?
+  direccion String?
+  costoEnvio Float @default(0)
   motivoCancelacion String?
-  canceladoPor      Role?
+  canceladoPor Role?
 
-  repartidorId      String?
-  repartidor        User?           @relation("RepartidorPedidos", fields: [repartidorId], references: [id])
+  repartidorId String?
+  repartidor User? @relation("RepartidorPedidos", fields: [repartidorId], references: [id])
 
-  detalles          PedidoDetalle[]
-  ofertasAplicadas  PedidoOferta[]
-  createdAt         DateTime        @default(now())
+  detalles PedidoDetalle[]
+  ofertasAplicadas PedidoOferta[]
+  movimientosCaja CajaMovimiento[]
+  createdAt DateTime @default(now())
 }
 
 model PedidoDetalle {
-  id            String        @id @default(uuid())
-  pedidoId      String
-  productoId    String
-  cantidad      Int
-  aderezos      Aderezo[]
+  id String @id @default(uuid())
+  pedidoId String
+  productoId String
+  cantidad Int
+  aderezos Aderezo[]
 
-  precioUnitario Float       @default(0)
+  precioUnitario Float @default(0)
+  sinExtras Boolean @default(false)
 
-  extras        Json?
+  extras Json?
 
-  subtotal      Float
-  notas         String?
+  subtotal Float
+  notas String?
 
-  pedido        Pedido       @relation(fields: [pedidoId], references: [id])
-  producto      Producto     @relation(fields: [productoId], references: [id])
+  pedido Pedido @relation(fields: [pedidoId], references: [id])
+  producto Producto @relation(fields: [productoId], references: [id])
   ofertaAplicada PedidoOferta[]
 }
 
 // --- GESTIÓN DE EXTRAS ---
 
 model Extra {
-  id          String   @id @default(uuid())
-  nombre      String   @unique
-  precio      Float    @default(500)   // precio por unidadMedida
-  unidadMedida String  @default("un")  // un | sobre | ml | gr | etc
-  stockActual Float    @default(0)
-  activo      Boolean  @default(true)
-  categoria   String   @default("ADEREZOS")
+  id        String   @id @default(uuid())
+  nombre    String   @unique
+  precio    Float    @default(500) // precio base (legacy, usar si no hay preciosPorCategoria)
+  unidadMedida String @default("un") // un | sobre | ml | gr | etc
+  stockActual Float @default(0)
+  activo    Boolean  @default(true)
+  categoria String @default("ADEREZOS")
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  // Relación OPCIONAL con insumos
+  // Si tiene insumoId, el stock se controla por insumo
+  // Si NO tiene insumoId, el stock se controla por stockActual del extra
+  insumoId  String?
+  insumo    Insumo?  @relation(fields: [insumoId], references: [id])
+
+  // Precios por categoría de producto
+  preciosPorCategoria ExtraPrecio[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ExtraPrecio {
+  id          String @id @default(uuid())
+  extraId     String
+  categoriaId String
+  precio      Float @default(0)
+
+  extra     Extra     @relation(fields: [extraId], references: [id], onDelete: Cascade)
+  categoria Categoria @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+
+  @@unique([extraId, categoriaId])
 }
 
 model Aderezo {
-  id        String          @id @default(uuid())
-  nombre    String          @unique
-  detalles  PedidoDetalle[]
+  id          String   @id @default(uuid())
+  nombre      String   @unique
+  stockActual Float    @default(0)
+  activo      Boolean  @default(true)
+
+  precioPorCategoria AderezoPrecio[]
+  detalles           PedidoDetalle[]
 }
 
 // ============================================
@@ -291,19 +325,63 @@ model GrupoOpcion {
 }
 
 model PedidoOferta {
-  id                String        @id @default(uuid())
-  pedidoId          String
-  ofertaId          String
-  pedidoDetalleId   String?       @unique
+  id String @id @default(uuid())
+  pedidoId String
+  ofertaId String
+  pedidoDetalleId String? @unique
 
-  precioOriginal    Float
-  precioFinal       Float
+  precioOriginal Float
+  precioFinal Float
   descuentoAplicado Float
 
-  pedido            Pedido        @relation(fields: [pedidoId], references: [id])
-  oferta            Oferta        @relation(fields: [ofertaId], references: [id])
-  pedidoDetalle     PedidoDetalle? @relation(fields: [pedidoDetalleId], references: [id])
+  pedido Pedido @relation(fields: [pedidoId], references: [id])
+  oferta Oferta @relation(fields: [ofertaId], references: [id])
+  pedidoDetalle PedidoDetalle? @relation(fields: [pedidoDetalleId], references: [id])
 
   @@index([pedidoId])
   @@index([ofertaId])
+}
+
+model AderezoPrecio {
+  id String @id @default(uuid())
+  aderezoId String
+  categoriaId String
+  precio Float @default(0)
+
+  aderezo Aderezo @relation(fields: [aderezoId], references: [id], onDelete: Cascade)
+  categoria Categoria @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+
+  @@unique([aderezoId, categoriaId])
+}
+
+enum TipoMovimientoCaja {
+  ENTRADA
+  SALIDA
+  AJUSTE
+}
+
+model CajaMovimiento {
+  id String @id @default(uuid())
+  pedidoId String?
+  tipo TipoMovimientoCaja
+  montoTotal Float
+  gananciaNegocio Float
+  gananciaRepartidor Float
+  descripcion String?
+  confirmadoPor String?
+  fechaConfirmacion DateTime?
+  createdAt DateTime @default(now())
+
+  pedido Pedido? @relation(fields: [pedidoId], references: [id])
+}
+
+// --- CONFIGURACIÓN DEL NEGOCIO ---
+
+model Configuracion {
+  id String @id @default(uuid())
+  clave String @unique // Ej: "alias_transferencia", "whatsapp_numero"
+  valor String // Ej: "after.panch", "+5491123456789"
+  descripcion String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

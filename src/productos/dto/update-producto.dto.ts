@@ -1,23 +1,36 @@
-import { IsArray, IsInt, IsNumber, IsOptional, IsString, Min } from "class-validator";
+import {
+  IsArray,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export class UpdateProductoDto {
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   nombre?: string;
 
-  @IsOptional() @IsNumber()
+  @IsOptional()
+  @IsNumber()
   @Min(0)
   precio?: number;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   categoriaId?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   descripcion?: string | null;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   codigo?: string | null;
 
-  @IsOptional() @IsInt()
+  @IsOptional()
+  @IsInt()
   @Min(0)
   tiempoPreparacionMin?: number | null;
 

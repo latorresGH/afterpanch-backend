@@ -1,8 +1,18 @@
-// src/aderezos/dto/create-aderezo.dto.ts
-import { IsString, IsNotEmpty } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsNumber,
+  Min,
+} from 'class-validator';
 
 export class CreateAderezoDto {
   @IsString()
   @IsNotEmpty()
   nombre: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  stockActual?: number;
 }

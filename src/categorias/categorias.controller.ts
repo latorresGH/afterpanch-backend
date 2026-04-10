@@ -1,41 +1,77 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
-import { CategoriasService } from "./categorias.service";
-import { CreateCategoriaDto } from "./dto/create-categoria.dto";
-import { UpdateCategoriaDto } from "./dto/update-categoria.dto";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { CategoriasService } from './categorias.service';
+import { CreateCategoriaDto } from './dto/create-categoria.dto';
+import { UpdateCategoriaDto } from './dto/update-categoria.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { Role } from '@prisma/client';
 
-@Controller("categorias")
+@ApiTags('Categorías')
+@ApiBearerAuth()
+@Controller('categorias')
+@UseGuards(JwtAuthGuard)
 export class CategoriasController {
   constructor(private readonly service: CategoriasService) {}
 
   @Post()
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Crear categoría',
+    description: 'Crea una nueva categoría de productos.',
+  })
   crear(@Body() dto: CreateCategoriaDto) {
     return this.service.crear(dto);
   }
 
-  // /categorias?incluirInactivas=true
   @Get()
-  listar(@Query("incluirInactivas") incluirInactivas?: string) {
-    return this.service.listar(incluirInactivas === "true");
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({
+    summary: 'Listar categorías',
+    description: 'Obtiene todas las categorías activas o todas según filtro.',
+  })
+  listar(@Query('incluirInactivas') incluirInactivas?: string) {
+    return this.service.listar(incluirInactivas === 'true');
   }
 
-  @Get(":id")
-  obtener(@Param("id") id: string) {
+  @Get(':id')
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({ summary: 'Obtener categoría por ID' })
+  obtener(@Param('id') id: string) {
     return this.service.obtener(id);
   }
 
-  @Patch(":id")
-  actualizar(@Param("id") id: string, @Body() dto: UpdateCategoriaDto) {
+  @Patch(':id')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Actualizar categoría' })
+  actualizar(@Param('id') id: string, @Body() dto: UpdateCategoriaDto) {
     return this.service.actualizar(id, dto);
   }
 
-  @Patch(":id/activo")
-  setActivo(@Param("id") id: string, @Body() body: { activo: boolean }) {
+  @Patch(':id/activo')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Cambiar estado activo de categoría' })
+  setActivo(@Param('id') id: string, @Body() body: { activo: boolean }) {
     return this.service.setActivo(id, body.activo);
   }
 
-  // delete real (bloqueado si tiene productos)
-  @Delete(":id")
-  borrar(@Param("id") id: string) {
+  @Delete(':id')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Eliminar categoría',
+    description: 'Solo si no tiene productos asociados.',
+  })
+  borrar(@Param('id') id: string) {
     return this.service.borrar(id);
   }
 }

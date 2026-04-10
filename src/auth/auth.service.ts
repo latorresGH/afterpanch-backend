@@ -1,8 +1,12 @@
-import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
-import { UsersService } from "src/users/users.service";
-import * as bcrypt from "bcrypt";
-import { JwtService } from "@nestjs/jwt";
-import { Role } from "@prisma/client";
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { UsersService } from 'src/users/users.service';
+import * as bcrypt from 'bcrypt';
+import { JwtService } from '@nestjs/jwt';
+import { Role } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -12,17 +16,19 @@ export class AuthService {
   ) {}
 
   private normalizeEmail(email: string) {
-    return (email || "").trim().toLowerCase();
+    return (email || '').trim().toLowerCase();
   }
 
   async register(email: string, password: string, nombre: string, role?: Role) {
     const normalized = this.normalizeEmail(email);
-    if (!normalized) throw new BadRequestException("Email inválido");
-    if (!password || password.length < 6) throw new BadRequestException("Password mínimo 6 caracteres");
-    if (!nombre || !nombre.trim()) throw new BadRequestException("Nombre es obligatorio");
+    if (!normalized) throw new BadRequestException('Email inválido');
+    if (!password || password.length < 6)
+      throw new BadRequestException('Password mínimo 6 caracteres');
+    if (!nombre || !nombre.trim())
+      throw new BadRequestException('Nombre es obligatorio');
 
     const existente = await this.usersService.findByEmail(normalized);
-    if (existente) throw new BadRequestException("El email ya está registrado");
+    if (existente) throw new BadRequestException('El email ya está registrado');
 
     // Si no mandan role, default TRABAJADOR
     const user = await this.usersService.create({
@@ -33,12 +39,22 @@ export class AuthService {
     });
 
     // si querés devolver token directo, descomentá esto:
-    const payload = { sub: user.id, role: user.role, email: user.email, nombre: user.nombre };
+    const payload = {
+      sub: user.id,
+      role: user.role,
+      email: user.email,
+      nombre: user.nombre,
+    };
     const access_token = await this.jwt.signAsync(payload);
 
     return {
       access_token,
-      user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role },
+      user: {
+        id: user.id,
+        email: user.email,
+        nombre: user.nombre,
+        role: user.role,
+      },
     };
 
     // si NO querés token en register, devolvé solo user:
@@ -47,28 +63,32 @@ export class AuthService {
 
   async login(email: string, password: string) {
     const normalized = this.normalizeEmail(email);
-    console.log("Intentando login para:", normalized);
 
     const user = await this.usersService.findByEmail(normalized);
     if (!user) {
-      console.log("❌ Usuario no encontrado en la DB");
-      throw new UnauthorizedException("Credenciales inválidas");
+      throw new UnauthorizedException('Credenciales inválidas');
     }
-
-    console.log("Usuario encontrado:", user.email);
-  console.log("Password en DB (debe ser un hash):", user.password);
 
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) {
-      console.log("❌ Password no coincide con el hash");
-      throw new UnauthorizedException("Credenciales inválidas");
+      throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    const payload = { sub: user.id, role: user.role, email: user.email, nombre: user.nombre };
+    const payload = {
+      sub: user.id,
+      role: user.role,
+      email: user.email,
+      nombre: user.nombre,
+    };
 
     return {
       access_token: await this.jwt.signAsync(payload),
-      user: { id: user.id, email: user.email, nombre: user.nombre, role: user.role },
+      user: {
+        id: user.id,
+        email: user.email,
+        nombre: user.nombre,
+        role: user.role,
+      },
     };
   }
 }

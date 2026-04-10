@@ -1,7 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { PrismaService } from "src/prisma/prisma.service";
-import { CreateProveedorDto } from "./dto/create-proveedore.dto";
-import { UpdateProveedorDto } from "./dto/update-proveedore.dto";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { CreateProveedorDto } from './dto/create-proveedore.dto';
+import { UpdateProveedorDto } from './dto/update-proveedore.dto';
 
 @Injectable()
 export class ProveedoresService {
@@ -22,7 +26,7 @@ export class ProveedoresService {
   async listar(incluirInactivos = false) {
     return this.prisma.proveedor.findMany({
       where: incluirInactivos ? {} : { activo: true },
-      orderBy: { nombre: "asc" },
+      orderBy: { nombre: 'asc' },
     });
   }
 
@@ -30,10 +34,10 @@ export class ProveedoresService {
     const prov = await this.prisma.proveedor.findUnique({
       where: { id },
       include: {
-        insumos: { orderBy: { nombre: "asc" } }, // útil para ver qué provee
+        insumos: { orderBy: { nombre: 'asc' } }, // útil para ver qué provee
       },
     });
-    if (!prov) throw new NotFoundException("Proveedor no encontrado");
+    if (!prov) throw new NotFoundException('Proveedor no encontrado');
     return prov;
   }
 
@@ -72,7 +76,7 @@ export class ProveedoresService {
 
     if (tieneInsumos > 0) {
       throw new BadRequestException(
-        "No se puede borrar un proveedor con insumos asignados. Usá baja lógica (activo=false) o desasigná los insumos.",
+        'No se puede borrar un proveedor con insumos asignados. Usá baja lógica (activo=false) o desasigná los insumos.',
       );
     }
 
@@ -84,6 +88,6 @@ export class ProveedoresService {
       where: { id },
       select: { id: true },
     });
-    if (!exists) throw new NotFoundException("Proveedor no encontrado");
+    if (!exists) throw new NotFoundException('Proveedor no encontrado');
   }
 }

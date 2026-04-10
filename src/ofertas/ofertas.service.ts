@@ -93,7 +93,9 @@ export class OfertasService {
         where: { id: oferta.id },
         include: {
           productos: { include: { producto: true } },
-          gruposCombo: { include: { opciones: { include: { producto: true } } } },
+          gruposCombo: {
+            include: { opciones: { include: { producto: true } } },
+          },
         },
       });
     });

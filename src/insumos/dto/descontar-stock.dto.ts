@@ -1,7 +1,7 @@
-import { IsNumber, Min } from "class-validator";
+import { IsNumber, Min } from 'class-validator';
 
 export class DescontarStockDto {
   @IsNumber()
-  @Min(0.000001, { message: "La cantidad a descontar debe ser mayor a 0" })
+  @Min(0.000001, { message: 'La cantidad a descontar debe ser mayor a 0' })
   cantidad: number;
 }

@@ -1,5 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException } from "@nestjs/common";
-import { PrismaService } from "src/prisma/prisma.service";
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class ProductosService {
@@ -11,7 +15,7 @@ export class ProductosService {
       where: { id: datos.categoriaId },
       select: { id: true },
     });
-    if (!cat) throw new BadRequestException("Categoría inválida");
+    if (!cat) throw new BadRequestException('Categoría inválida');
 
     return this.prisma.producto.create({
       data: {
@@ -20,7 +24,8 @@ export class ProductosService {
         descripcion: datos.descripcion ?? null,
         codigo: datos.codigo ?? null,
         tiempoPreparacionMin:
-          datos.tiempoPreparacionMin !== undefined && datos.tiempoPreparacionMin !== null
+          datos.tiempoPreparacionMin !== undefined &&
+          datos.tiempoPreparacionMin !== null
             ? Number(datos.tiempoPreparacionMin)
             : null,
         activo: true,
@@ -46,7 +51,7 @@ export class ProductosService {
         categoria: true,
         receta: { include: { insumo: true } },
       },
-      orderBy: { nombre: "asc" },
+      orderBy: { nombre: 'asc' },
     });
   }
 
@@ -58,89 +63,92 @@ export class ProductosService {
         receta: { include: { insumo: true } },
       },
     });
-    if (!prod) throw new NotFoundException("Producto no encontrado");
+    if (!prod) throw new NotFoundException('Producto no encontrado');
     return prod;
   }
-  
-async update(id: string, dto: any) {
-  await this.ensureExists(id);
 
-  const { receta, categoriaId, ...productoData } = dto;
+  async update(id: string, dto: any) {
+    await this.ensureExists(id);
 
-  // validar categoriaId si viene y no es vacío
-  if (categoriaId) {
-    const cat = await this.prisma.categoria.findUnique({
-      where: { id: categoriaId },
-      select: { id: true },
-    });
-    if (!cat) throw new BadRequestException("Categoría inválida");
-  }
+    const { receta, categoriaId, ...productoData } = dto;
 
-  return this.prisma.$transaction(async (tx) => {
-    await tx.producto.update({
-      where: { id },
-      data: {
-        nombre:
-          productoData.nombre !== undefined
-            ? String(productoData.nombre).trim()
-            : undefined,
-
-        precio:
-          productoData.precio !== undefined
-            ? Number(productoData.precio)
-            : undefined,
-
-        descripcion:
-          productoData.descripcion !== undefined
-            ? (productoData.descripcion === null ? null : String(productoData.descripcion))
-            : undefined,
-
-        codigo:
-          productoData.codigo !== undefined
-            ? (productoData.codigo === "" ? null : String(productoData.codigo))
-            : undefined,
-
-        tiempoPreparacionMin:
-          productoData.tiempoPreparacionMin !== undefined
-            ? (productoData.tiempoPreparacionMin === null
-                ? null
-                : Number(productoData.tiempoPreparacionMin))
-            : undefined,
-
-        // ✅ RELACIÓN: connect / disconnect (UNA sola forma)
-        categoria:
-          categoriaId !== undefined
-            ? (categoriaId
-                ? { connect: { id: categoriaId } }
-                : { disconnect: true })
-            : undefined,
-      },
-    });
-
-    if (Array.isArray(receta)) {
-      await tx.productoReceta.deleteMany({ where: { productoId: id } });
-
-      if (receta.length > 0) {
-        await tx.productoReceta.createMany({
-          data: receta.map((r: any) => ({
-            productoId: id,
-            insumoId: r.insumoId,
-            cantidad: Number(r.cantidad),
-          })),
-        });
-      }
+    // validar categoriaId si viene y no es vacío
+    if (categoriaId) {
+      const cat = await this.prisma.categoria.findUnique({
+        where: { id: categoriaId },
+        select: { id: true },
+      });
+      if (!cat) throw new BadRequestException('Categoría inválida');
     }
 
-    return tx.producto.findUnique({
-      where: { id },
-      include: {
-        categoria: true,
-        receta: { include: { insumo: true } },
-      },
-    });
-  });
-}
+    return this.prisma.$transaction(async (tx) => {
+      await tx.producto.update({
+        where: { id },
+        data: {
+          nombre:
+            productoData.nombre !== undefined
+              ? String(productoData.nombre).trim()
+              : undefined,
 
+          precio:
+            productoData.precio !== undefined
+              ? Number(productoData.precio)
+              : undefined,
+
+          descripcion:
+            productoData.descripcion !== undefined
+              ? productoData.descripcion === null
+                ? null
+                : String(productoData.descripcion)
+              : undefined,
+
+          codigo:
+            productoData.codigo !== undefined
+              ? productoData.codigo === ''
+                ? null
+                : String(productoData.codigo)
+              : undefined,
+
+          tiempoPreparacionMin:
+            productoData.tiempoPreparacionMin !== undefined
+              ? productoData.tiempoPreparacionMin === null
+                ? null
+                : Number(productoData.tiempoPreparacionMin)
+              : undefined,
+
+          // ✅ RELACIÓN: connect / disconnect (UNA sola forma)
+          categoria:
+            categoriaId !== undefined
+              ? categoriaId
+                ? { connect: { id: categoriaId } }
+                : { disconnect: true }
+              : undefined,
+        },
+      });
+
+      if (Array.isArray(receta)) {
+        await tx.productoReceta.deleteMany({ where: { productoId: id } });
+
+        if (receta.length > 0) {
+          await tx.productoReceta.createMany({
+            data: receta.map((r: any) => ({
+              productoId: id,
+              insumoId: r.insumoId,
+              cantidad: Number(r.cantidad),
+            })),
+          });
+        }
+      }
+
+      return tx.producto.findUnique({
+        where: { id },
+        include: {
+          categoria: true,
+          receta: { include: { insumo: true } },
+        },
+      });
+    });
+  }
 
   async setActivo(id: string, activo: boolean) {
     await this.ensureExists(id);
@@ -160,7 +168,7 @@ async update(id: string, dto: any) {
 
     if (usadoEnPedidos > 0) {
       throw new BadRequestException(
-        "No se puede borrar un producto que ya fue usado en pedidos. Usá baja lógica (activo=false).",
+        'No se puede borrar un producto que ya fue usado en pedidos. Usá baja lógica (activo=false).',
       );
     }
 
@@ -174,6 +182,6 @@ async update(id: string, dto: any) {
       where: { id },
       select: { id: true },
     });
-    if (!exists) throw new NotFoundException("Producto no encontrado");
+    if (!exists) throw new NotFoundException('Producto no encontrado');
   }
 }

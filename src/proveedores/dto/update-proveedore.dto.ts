@@ -1,18 +1,23 @@
-import { IsBoolean, IsEmail, IsOptional, IsString } from "class-validator";
+import { IsBoolean, IsEmail, IsOptional, IsString } from 'class-validator';
 
 export class UpdateProveedorDto {
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   nombre?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   telefono?: string;
 
-  @IsOptional() @IsEmail()
+  @IsOptional()
+  @IsEmail()
   email?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   notas?: string;
 
-  @IsOptional() @IsBoolean()
+  @IsOptional()
+  @IsBoolean()
   activo?: boolean;
 }

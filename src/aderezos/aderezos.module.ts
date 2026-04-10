@@ -4,6 +4,6 @@ import { AderezosService } from './aderezos.service';
 
 @Module({
   controllers: [AderezosController],
-  providers: [AderezosService]
+  providers: [AderezosService],
 })
 export class AderezosModule {}

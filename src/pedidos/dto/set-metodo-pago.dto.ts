@@ -1,9 +1,9 @@
-import { IsEnum, IsOptional, IsString } from "class-validator";
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 export enum MetodoPagoDto {
-  EFECTIVO = "EFECTIVO",
-  TRANSFERENCIA = "TRANSFERENCIA",
-  TARJETA = "TARJETA",
+  EFECTIVO = 'EFECTIVO',
+  TRANSFERENCIA = 'TRANSFERENCIA',
+  TARJETA = 'TARJETA',
 }
 
 export class SetMetodoPagoDto {

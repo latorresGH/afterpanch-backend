@@ -1,12 +1,21 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { PrismaService } from "src/prisma/prisma.service";
-import { UpdateInsumoDto } from "./dto/update-insumo.dto";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { UpdateInsumoDto } from './dto/update-insumo.dto';
 
 @Injectable()
 export class InsumosService {
   constructor(private prisma: PrismaService) {}
 
-  async crear(nombre: string, stockInicial: number, unidad: string, proveedorId: string | null) {
+  async crear(
+    nombre: string,
+    stockInicial: number,
+    unidad: string,
+    proveedorId: string | null,
+  ) {
     return this.prisma.insumo.create({
       data: {
         nombre: nombre.trim(),
@@ -23,8 +32,17 @@ export class InsumosService {
     return this.prisma.insumo.findMany({
       where: incluirInactivos ? {} : { activo: true },
       include: { proveedor: true },
-      orderBy: { nombre: "asc" },
+      orderBy: { nombre: 'asc' },
     });
+  }
+
+  async obtener(id: string) {
+    const insumo = await this.prisma.insumo.findUnique({
+      where: { id },
+      include: { proveedor: true },
+    });
+    if (!insumo) throw new NotFoundException('Insumo no encontrado');
+    return insumo;
   }
 
   async actualizar(id: string, dto: UpdateInsumoDto) {
@@ -37,7 +55,10 @@ export class InsumosService {
       data: {
         ...rest,
         nombre: rest.nombre !== undefined ? rest.nombre.trim() : undefined,
-        unidadMedida: rest.unidadMedida !== undefined ? rest.unidadMedida.trim() : undefined,
+        unidadMedida:
+          rest.unidadMedida !== undefined
+            ? rest.unidadMedida.trim()
+            : undefined,
 
         // ✅ asignar / quitar proveedor
         proveedor:
@@ -56,7 +77,7 @@ export class InsumosService {
 
     const cant = Number(cantidad);
     if (!Number.isFinite(cant) || cant <= 0) {
-      throw new BadRequestException("Cantidad inválida");
+      throw new BadRequestException('Cantidad inválida');
     }
 
     return this.prisma.insumo.update({
@@ -85,7 +106,7 @@ export class InsumosService {
 
     if (usadoEnRecetas > 0) {
       throw new BadRequestException(
-        "No se puede borrar un insumo que está en recetas. Usá baja lógica (activo=false).",
+        'No se puede borrar un insumo que está en recetas. Usá baja lógica (activo=false).',
       );
     }
 
@@ -97,36 +118,35 @@ export class InsumosService {
       where: { id },
       select: { id: true },
     });
-    if (!exists) throw new NotFoundException("Insumo no encontrado");
+    if (!exists) throw new NotFoundException('Insumo no encontrado');
   }
 
   async descontarStock(id: string, cantidad: number) {
-  const cant = Number(cantidad);
-  if (!Number.isFinite(cant) || cant <= 0) {
-    throw new BadRequestException("Cantidad inválida");
+    const cant = Number(cantidad);
+    if (!Number.isFinite(cant) || cant <= 0) {
+      throw new BadRequestException('Cantidad inválida');
+    }
+
+    // 1) Traer insumo actual
+    const insumo = await this.prisma.insumo.findUnique({
+      where: { id },
+      select: { id: true, stockActual: true },
+    });
+
+    if (!insumo) throw new NotFoundException('Insumo no encontrado');
+
+    // 2) Validar que no quede negativo
+    const stockActual = Number(insumo.stockActual);
+    if (stockActual - cant < 0) {
+      throw new BadRequestException(
+        `Stock insuficiente. Actual: ${stockActual}, querés descontar: ${cant}`,
+      );
+    }
+
+    // 3) Descontar
+    return this.prisma.insumo.update({
+      where: { id },
+      data: { stockActual: { decrement: cant } },
+    });
   }
-
-  // 1) Traer insumo actual
-  const insumo = await this.prisma.insumo.findUnique({
-    where: { id },
-    select: { id: true, stockActual: true },
-  });
-
-  if (!insumo) throw new NotFoundException("Insumo no encontrado");
-
-  // 2) Validar que no quede negativo
-  const stockActual = Number(insumo.stockActual);
-  if (stockActual - cant < 0) {
-    throw new BadRequestException(
-      `Stock insuficiente. Actual: ${stockActual}, querés descontar: ${cant}`,
-    );
-  }
-
-  // 3) Descontar
-  return this.prisma.insumo.update({
-    where: { id },
-    data: { stockActual: { decrement: cant } },
-  });
-}
-
 }

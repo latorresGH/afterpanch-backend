@@ -1,21 +1,32 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Min } from "class-validator";
+import {
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export class UpdateInsumoDto {
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   nombre?: string;
 
-  @IsOptional() @IsNumber()
+  @IsOptional()
+  @IsNumber()
   @Min(0)
   stockMinimo?: number;
 
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   unidadMedida?: string;
 
   // ✅ asignar / sacar proveedor
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   proveedorId?: string | null;
 
   // ✅ alta/baja lógica
-  @IsOptional() @IsBoolean()
+  @IsOptional()
+  @IsBoolean()
   activo?: boolean;
 }

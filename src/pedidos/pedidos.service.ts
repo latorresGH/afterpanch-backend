@@ -13,7 +13,7 @@ const ESTADOS_ABIERTOS: EstadoPedido[] = [
   EstadoPedido.EN_CAMINO,
 ];
 
-const LIMITE_EXTRAS_GRATIS = 3;
+const LIMITE_EXTRAS_GRATIS = 2;
 
 @Injectable()
 export class PedidosService {
@@ -29,8 +29,10 @@ export class PedidosService {
       detalles,
       pedidoId,
       nombreCliente,
+      apellidoCliente,
       metodoPago,
       numeroCliente,
+      costoEnvio,
     } = dto;
 
     if (!detalles || detalles.length === 0) {
@@ -44,6 +46,7 @@ export class PedidosService {
     }
 
     const nombreClienteLimpio = nombreCliente?.trim() || null;
+    const apellidoClienteLimpio = apellidoCliente?.trim() || null;
     const numeroClienteLimpio = numeroCliente?.trim() || null;
 
     if (
@@ -54,13 +57,19 @@ export class PedidosService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      // -----------------------------
-      // 1) Traer productos
-      // -----------------------------
       const productoIds = detalles.map((d) => d.productoId);
       const productos = await tx.producto.findMany({
         where: { id: { in: productoIds } },
-        select: { id: true, precio: true, activo: true, nombre: true },
+        select: {
+          id: true,
+          precio: true,
+          activo: true,
+          nombre: true,
+          categoriaId: true,
+          receta: {
+            include: { insumo: { select: { id: true, stockActual: true } } },
+          },
+        },
       });
 
       const prodMap = new Map(
@@ -70,6 +79,8 @@ export class PedidosService {
             precio: Number(p.precio),
             activo: Boolean(p.activo),
             nombre: p.nombre,
+            categoriaId: p.categoriaId,
+            receta: p.receta,
           },
         ]),
       );
@@ -81,9 +92,6 @@ export class PedidosService {
           throw new BadRequestException(`Producto inactivo: ${pid}`);
       }
 
-      // -----------------------------
-      // 2) Traer extras y Validar Aderezos
-      // -----------------------------
       const extraIds = detalles
         .flatMap((d) => (d as any).extras ?? [])
         .map((e: any) => e.extraId);
@@ -98,72 +106,196 @@ export class PedidosService {
               precio: true,
               stockActual: true,
               activo: true,
+              insumoId: true,
+              preciosPorCategoria: true,
             },
           })
         : [];
 
       const extraMap = new Map(
-        extrasDb.map((e) => [e.id, { ...e, precio: Number(e.precio) }]),
+        extrasDb.map((e) => [
+          e.id,
+          {
+            ...e,
+            precio: Number(e.precio),
+            preciosPorCategoria: e.preciosPorCategoria,
+          },
+        ]),
       );
 
-      // Validar Aderezos (NUEVO)
-      const todosLosAderezosIds = detalles
-        .flatMap((d) => (d as any).aderezosIds ?? [])
-        .map((id: any) => String(id));
+      const todosLosAderezosIds = detalles.flatMap(
+        (d) => (d as any).aderezosIds ?? [],
+      );
 
-      if (todosLosAderezosIds.length > 0) {
-        const aderezosExistentes = await tx.aderezo.findMany({
-          where: { id: { in: todosLosAderezosIds } },
-          select: { id: true },
-        });
-        if (aderezosExistentes.length !== new Set(todosLosAderezosIds).size) {
-          throw new BadRequestException('Uno o más aderezos no existen');
+      const aderezosDb =
+        todosLosAderezosIds.length > 0
+          ? await tx.aderezo.findMany({
+              where: { id: { in: todosLosAderezosIds } },
+              select: {
+                id: true,
+                nombre: true,
+                stockActual: true,
+                activo: true,
+              },
+            })
+          : [];
+
+      const aderezoMap = new Map(
+        aderezosDb.map((a) => [
+          a.id,
+          { ...a, stockActual: Number(a.stockActual) },
+        ]),
+      );
+
+      for (const adeId of todosLosAderezosIds) {
+        if (!aderezoMap.has(adeId)) {
+          throw new BadRequestException(`Aderezo no encontrado: ${adeId}`);
+        }
+        const ade = aderezoMap.get(adeId)!;
+        if (!ade.activo) {
+          throw new BadRequestException(`Aderezo inactivo: ${ade.nombre}`);
+        }
+        if (ade.stockActual <= 0) {
+          throw new BadRequestException(`Sin stock de aderezo: ${ade.nombre}`);
         }
       }
 
-      // -----------------------------
-      // 3) Armar detalles + calcular total
-      // -----------------------------
+      const stockChecks: { insumoId: string; requerido: number }[] = [];
+
+      for (const d of detalles as any[]) {
+        const cantidad = Number(d.cantidad);
+        const prod = prodMap.get(d.productoId)!;
+
+        if (prod.receta && prod.receta.length > 0) {
+          for (const recetaItem of prod.receta) {
+            const requerido = recetaItem.cantidad * cantidad;
+            stockChecks.push({
+              insumoId: recetaItem.insumoId,
+              requerido,
+            });
+          }
+        }
+
+        if (d.extras && Array.isArray(d.extras)) {
+          for (const e of d.extras) {
+            const extra = extraMap.get(e.extraId);
+            if (!extra)
+              throw new BadRequestException(
+                `Extra no encontrado: ${e.extraId}`,
+              );
+            if (!extra.activo)
+              throw new BadRequestException(`Extra inactivo: ${e.extraId}`);
+            const cantidadExtra = e.cantidad ?? 1;
+
+            const stockDisponible = extra.insumoId
+              ? ((
+                  await tx.insumo.findUnique({
+                    where: { id: extra.insumoId },
+                    select: { stockActual: true },
+                  })
+                )?.stockActual ?? 0)
+              : extra.stockActual;
+
+            if (stockDisponible < cantidadExtra) {
+              throw new BadRequestException(
+                `Stock insuficiente para extra ${extra.nombre}. Disponible: ${stockDisponible}`,
+              );
+            }
+          }
+        }
+
+        const cantidadAderezos = d.aderezosIds?.length || 0;
+        for (const adeId of d.aderezosIds || []) {
+          const ade = aderezoMap.get(adeId);
+          if (ade && ade.stockActual < cantidad) {
+            throw new BadRequestException(
+              `Stock insuficiente de aderezo ${ade.nombre}. Disponible: ${ade.stockActual}, Necesario: ${cantidad}`,
+            );
+          }
+        }
+      }
+
+      const insumoIds = [...new Set(stockChecks.map((s) => s.insumoId))];
+      const insumosActuales = await tx.insumo.findMany({
+        where: { id: { in: insumoIds } },
+        select: { id: true, stockActual: true, nombre: true },
+      });
+
+      const stockPorInsumo = new Map(
+        insumosActuales.map((i) => [i.id, Number(i.stockActual)]),
+      );
+
+      const stockRequeridoPorInsumo = new Map<string, number>();
+      for (const check of stockChecks) {
+        const actual = stockRequeridoPorInsumo.get(check.insumoId) || 0;
+        stockRequeridoPorInsumo.set(check.insumoId, actual + check.requerido);
+      }
+
+      for (const [insumoId, requerido] of stockRequeridoPorInsumo) {
+        const disponible = stockPorInsumo.get(insumoId) || 0;
+        if (disponible < requerido) {
+          const insumo = insumosActuales.find((i) => i.id === insumoId);
+          throw new BadRequestException(
+            `Stock insuficiente de ${insumo?.nombre || insumoId}. Disponible: ${disponible}, Requerido: ${requerido}`,
+          );
+        }
+      }
+
       let totalNuevosItems = 0;
       const detallesCreate: Prisma.PedidoDetalleCreateWithoutPedidoInput[] = [];
+
+      const todosLosExtras: { extraId: string; cantidad: number }[] = [];
+      const todosLosAderezosDescontar: {
+        aderezoId: string;
+        cantidad: number;
+      }[] = [];
 
       for (const d of detalles as any[]) {
         const base = prodMap.get(d.productoId)!;
         const cantidad = Number(d.cantidad);
         const precioUnitario = d.precioUnitario ?? base.precio;
+        const categoriaId = base.categoriaId;
 
-        // Lógica de Extras (se mantiene igual)
         const extrasDto = Array.isArray(d.extras) ? d.extras : [];
+        const sinExtras = d.sinExtras === true;
+
         const extrasNorm = extrasDto.map((e) => ({
           extraId: String(e.extraId),
           cantidad: e.cantidad ?? 1,
         }));
 
+        todosLosExtras.push(...extrasNorm);
+
         let extrasCobradoTotal = 0;
         const extrasJsonArr: any[] = [];
-        const expanded: string[] = [];
+
+        const expanded: { extraId: string; extra: any }[] = [];
         extrasNorm.forEach((e) => {
-          for (let i = 0; i < e.cantidad; i++) expanded.push(e.extraId);
+          const extra = extraMap.get(e.extraId);
+          if (extra) {
+            for (let i = 0; i < e.cantidad; i++) {
+              expanded.push({ extraId: e.extraId, extra });
+            }
+          }
+        });
+
+        expanded.sort((a, b) => {
+          const precioA = this.getExtraPrecio(a.extra, categoriaId);
+          const precioB = this.getExtraPrecio(b.extra, categoriaId);
+          return precioB - precioA;
         });
 
         for (let idx = 0; idx < expanded.length; idx++) {
-          const ex = extraMap.get(expanded[idx])!;
+          const { extraId, extra } = expanded[idx];
+          const precioExtra = this.getExtraPrecio(extra, categoriaId);
           const cobrado = idx >= LIMITE_EXTRAS_GRATIS;
-          const precioExtra = cobrado ? ex.precio : 0;
-          extrasCobradoTotal += precioExtra;
+          const precioFinal = cobrado ? precioExtra : 0;
+          extrasCobradoTotal += precioFinal;
           extrasJsonArr.push({
-            id: ex.id,
-            nombre: ex.nombre,
-            precio: ex.precio,
+            id: extraId,
+            nombre: extra.nombre,
+            precio: precioExtra,
             cobrado,
-          });
-        }
-
-        // Descuento stock extras
-        for (const e of extrasNorm) {
-          await tx.extra.update({
-            where: { id: e.extraId },
-            data: { stockActual: { decrement: e.cantidad } },
           });
         }
 
@@ -177,18 +309,117 @@ export class PedidosService {
           ? d.aderezosIds
           : [];
 
+        for (const adeId of aderezosIds) {
+          todosLosAderezosDescontar.push({ aderezoId: adeId, cantidad });
+        }
+
         detallesCreate.push({
           cantidad,
           precioUnitario,
           extras: extrasJson,
           subtotal,
           notas: d.notas?.trim?.() || null,
+          sinExtras,
           producto: { connect: { id: d.productoId } },
           aderezos:
             aderezosIds.length > 0
               ? { connect: aderezosIds.map((id) => ({ id })) }
               : undefined,
         });
+      }
+
+      for (const e of todosLosExtras) {
+        const extra = await tx.extra.findUnique({
+          where: { id: e.extraId },
+          select: { id: true, insumoId: true, stockActual: true, nombre: true },
+        });
+
+        if (!extra) {
+          throw new BadRequestException(`Extra no encontrado: ${e.extraId}`);
+        }
+
+        if (extra.insumoId) {
+          const result = await tx.insumo.updateMany({
+            where: {
+              id: extra.insumoId,
+              stockActual: { gte: e.cantidad },
+            },
+            data: {
+              stockActual: { decrement: e.cantidad },
+            },
+          });
+
+          if (result.count === 0) {
+            const insumo = await tx.insumo.findUnique({
+              where: { id: extra.insumoId },
+              select: { stockActual: true, nombre: true },
+            });
+            throw new BadRequestException(
+              `Stock insuficiente para extra ${extra.nombre} (insumo: ${insumo?.nombre || extra.insumoId}). ` +
+                `Disponible: ${insumo?.stockActual ?? 0}, Solicitado: ${e.cantidad}`,
+            );
+          }
+        } else {
+          const result = await tx.extra.updateMany({
+            where: {
+              id: e.extraId,
+              stockActual: { gte: e.cantidad },
+            },
+            data: {
+              stockActual: { decrement: e.cantidad },
+            },
+          });
+
+          if (result.count === 0) {
+            throw new BadRequestException(
+              `Stock insuficiente para extra ${extra.nombre}. ` +
+                `Disponible: ${extra.stockActual ?? 0}, Solicitado: ${e.cantidad}`,
+            );
+          }
+        }
+      }
+
+      for (const item of todosLosAderezosDescontar) {
+        const result = await tx.aderezo.updateMany({
+          where: {
+            id: item.aderezoId,
+            stockActual: { gte: item.cantidad },
+          },
+          data: {
+            stockActual: { decrement: item.cantidad },
+          },
+        });
+
+        if (result.count === 0) {
+          const ade = aderezoMap.get(item.aderezoId);
+          throw new BadRequestException(
+            `Stock insuficiente de aderezo ${ade?.nombre || item.aderezoId}. ` +
+              `Disponible: ${ade?.stockActual ?? 0}, Necesario: ${item.cantidad}`,
+          );
+        }
+      }
+
+      for (const [insumoId, requerido] of stockRequeridoPorInsumo) {
+        const result = await tx.insumo.updateMany({
+          where: {
+            id: insumoId,
+            stockActual: { gte: requerido },
+          },
+          data: {
+            stockActual: { decrement: requerido },
+          },
+        });
+
+        if (result.count === 0) {
+          const insumo = await tx.insumo.findUnique({
+            where: { id: insumoId },
+            select: { stockActual: true, nombre: true },
+          });
+          throw new BadRequestException(
+            `Stock insuficiente de ${insumo?.nombre || insumoId}. ` +
+              `Disponible: ${insumo?.stockActual ?? 0}, Requerido: ${requerido}`,
+          );
+        }
       }
 
       const lineasParaCalcular = detalles.map((d: any) => ({
@@ -198,7 +429,10 @@ export class PedidosService {
         extras: (d.extras || []).map((e: any) => ({
           extraId: e.extraId,
           cantidad: e.cantidad ?? 1,
-          precio: extraMap.get(e.extraId)?.precio || 0,
+          precio: this.getExtraPrecio(
+            extraMap.get(e.extraId),
+            prodMap.get(d.productoId)?.categoriaId,
+          ),
         })),
       }));
 
@@ -207,14 +441,11 @@ export class PedidosService {
 
       const totalConOfertas = totalNuevosItems - calculoOfertas.descuento;
 
-      // -----------------------------
-      // 4) Anexar o crear
-      // -----------------------------
       const includeConfig = {
         detalles: {
           include: {
             producto: true,
-            aderezos: true, // <-- Incluimos aderezos en la respuesta
+            aderezos: true,
           },
         },
       };
@@ -226,6 +457,7 @@ export class PedidosService {
             id: true,
             estado: true,
             nombreCliente: true,
+            apellidoCliente: true,
             numeroCliente: true,
             metodoPago: true,
           },
@@ -243,33 +475,25 @@ export class PedidosService {
             ...(!pedido.nombreCliente && nombreClienteLimpio
               ? { nombreCliente: nombreClienteLimpio }
               : {}),
+            ...(!pedido.apellidoCliente && apellidoClienteLimpio
+              ? { apellidoCliente: apellidoClienteLimpio }
+              : {}),
             ...(!pedido.numeroCliente && numeroClienteLimpio
               ? { numeroCliente: numeroClienteLimpio }
               : {}),
             ...(!pedido.metodoPago && metodoPago
               ? { metodoPago: metodoPago as MetodoPago }
               : {}),
+            ...(costoEnvio !== undefined ? { costoEnvio } : {}),
           },
           include: includeConfig,
         });
 
-        if (calculoOfertas.ofertasAplicadas.length > 0) {
-          for (const ofertaAplicada of calculoOfertas.ofertasAplicadas) {
-            await tx.pedidoOferta.create({
-              data: {
-                pedidoId: pedidoActualizado.id,
-                ofertaId: ofertaAplicada.ofertaId,
-                precioOriginal: calculoOfertas.subtotal,
-                precioFinal: calculoOfertas.total,
-                descuentoAplicado: ofertaAplicada.descuento,
-              },
-            });
-            await tx.oferta.update({
-              where: { id: ofertaAplicada.ofertaId },
-              data: { usosActuales: { increment: 1 } },
-            });
-          }
-        }
+        await this.registrarOfertasAplicadas(
+          tx,
+          pedidoActualizado.id,
+          calculoOfertas,
+        );
 
         return pedidoActualizado;
       }
@@ -278,9 +502,11 @@ export class PedidosService {
         data: {
           tipo,
           nombreCliente: nombreClienteLimpio!,
-          numeroCliente: numeroClienteLimpio,
+          apellidoCliente: apellidoClienteLimpio,
           metodoPago: (metodoPago as MetodoPago) ?? null,
+          numeroCliente: numeroClienteLimpio,
           direccion: tipo === TipoPedidoDto.DELIVERY ? direccion!.trim() : null,
+          costoEnvio: costoEnvio ?? 0,
           total: totalConOfertas,
           estado: EstadoPedido.PENDIENTE,
           detalles: { create: detallesCreate },
@@ -288,26 +514,52 @@ export class PedidosService {
         include: includeConfig,
       });
 
-      if (calculoOfertas.ofertasAplicadas.length > 0) {
-        for (const ofertaAplicada of calculoOfertas.ofertasAplicadas) {
-          await tx.pedidoOferta.create({
-            data: {
-              pedidoId: pedidoNuevo.id,
-              ofertaId: ofertaAplicada.ofertaId,
-              precioOriginal: calculoOfertas.subtotal,
-              precioFinal: calculoOfertas.total,
-              descuentoAplicado: ofertaAplicada.descuento,
-            },
-          });
-          await tx.oferta.update({
-            where: { id: ofertaAplicada.ofertaId },
-            data: { usosActuales: { increment: 1 } },
-          });
-        }
-      }
+      await this.registrarOfertasAplicadas(tx, pedidoNuevo.id, calculoOfertas);
 
       return pedidoNuevo;
     });
+  }
+
+  private getExtraPrecio(
+    extra: any,
+    categoriaId: string | null | undefined,
+  ): number {
+    if (!extra) return 0;
+
+    if (extra.preciosPorCategoria && categoriaId) {
+      const precioEspecifico = extra.preciosPorCategoria.find(
+        (p: any) => p.categoriaId === categoriaId,
+      );
+      if (precioEspecifico) {
+        return Number(precioEspecifico.precio);
+      }
+    }
+
+    return Number(extra.precio);
+  }
+
+  private async registrarOfertasAplicadas(
+    tx: Prisma.TransactionClient,
+    pedidoId: string,
+    calculoOfertas: any,
+  ) {
+    if (calculoOfertas.ofertasAplicadas.length > 0) {
+      for (const ofertaAplicada of calculoOfertas.ofertasAplicadas) {
+        await tx.pedidoOferta.create({
+          data: {
+            pedidoId,
+            ofertaId: ofertaAplicada.ofertaId,
+            precioOriginal: calculoOfertas.subtotal,
+            precioFinal: calculoOfertas.total,
+            descuentoAplicado: ofertaAplicada.descuento,
+          },
+        });
+        await tx.oferta.update({
+          where: { id: ofertaAplicada.ofertaId },
+          data: { usosActuales: { increment: 1 } },
+        });
+      }
+    }
   }
 
   async listarTodos() {
@@ -320,6 +572,7 @@ export class PedidosService {
           },
         },
         repartidor: { select: { nombre: true, role: true } },
+        movimientosCaja: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -339,6 +592,25 @@ export class PedidosService {
     });
   }
 
+  async findOne(id: string) {
+    const pedido = await this.prisma.pedido.findUnique({
+      where: { id },
+      include: {
+        detalles: {
+          include: {
+            producto: { include: { categoria: true } },
+            aderezos: true,
+          },
+        },
+        repartidor: { select: { id: true, nombre: true } },
+        movimientosCaja: true,
+      },
+    });
+
+    if (!pedido) throw new NotFoundException('Pedido no encontrado');
+    return pedido;
+  }
+
   async cambiarEstado(id: string, nuevoEstado: EstadoPedido) {
     const pedidoExistente = await this.prisma.pedido.findUnique({
       where: { id },
@@ -349,7 +621,6 @@ export class PedidosService {
       throw new NotFoundException(`El pedido con ID ${id} no existe`);
     }
 
-    // Regla sana: si está ENTREGADO o CANCELADO no debería cambiar
     if (
       pedidoExistente.estado === EstadoPedido.ENTREGADO ||
       pedidoExistente.estado === EstadoPedido.CANCELADO
@@ -365,7 +636,6 @@ export class PedidosService {
     });
   }
 
-  // ✅ ahora finalizar = ENTREGADO
   async finalizarPedido(id: string) {
     const pedido = await this.prisma.pedido.findUnique({
       where: { id },
@@ -390,30 +660,98 @@ export class PedidosService {
   }
 
   async cancelarPedido(id: string, motivo: string, rol: Role) {
-    const pedido = await this.prisma.pedido.findUnique({
-      where: { id },
-      select: { id: true, estado: true },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const pedido = await tx.pedido.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          estado: true,
+          detalles: {
+            include: {
+              producto: {
+                select: {
+                  id: true,
+                  receta: {
+                    include: { insumo: { select: { id: true } } },
+                  },
+                },
+              },
+              aderezos: { select: { id: true } },
+            },
+          },
+        },
+      });
 
-    if (!pedido) throw new NotFoundException('Pedido no encontrado');
+      if (!pedido) throw new NotFoundException('Pedido no encontrado');
 
-    if (pedido.estado === EstadoPedido.CANCELADO) {
-      throw new BadRequestException('El pedido ya estaba cancelado');
-    }
-    if (pedido.estado === EstadoPedido.ENTREGADO) {
-      throw new BadRequestException('No se puede cancelar un pedido entregado');
-    }
+      if (pedido.estado === EstadoPedido.CANCELADO) {
+        throw new BadRequestException('El pedido ya estaba cancelado');
+      }
+      if (pedido.estado === EstadoPedido.ENTREGADO) {
+        throw new BadRequestException(
+          'No se puede cancelar un pedido entregado',
+        );
+      }
 
-    const motivoLimpio = (motivo || '').trim();
-    if (!motivoLimpio) throw new BadRequestException('Motivo obligatorio');
+      const motivoLimpio = (motivo || '').trim();
+      if (!motivoLimpio) throw new BadRequestException('Motivo obligatorio');
 
-    return this.prisma.pedido.update({
-      where: { id },
-      data: {
-        estado: EstadoPedido.CANCELADO,
-        motivoCancelacion: motivoLimpio,
-        canceladoPor: rol,
-      },
+      for (const detalle of pedido.detalles) {
+        const extrasJson = detalle.extras as any[] | null;
+        if (extrasJson && Array.isArray(extrasJson)) {
+          const extrasCount = new Map<string, number>();
+          for (const ex of extrasJson) {
+            const count = extrasCount.get(ex.id) || 0;
+            extrasCount.set(ex.id, count + 1);
+          }
+          for (const [extraId, count] of extrasCount) {
+            const extra = await tx.extra.findUnique({
+              where: { id: extraId },
+              select: { insumoId: true },
+            });
+
+            if (extra?.insumoId) {
+              await tx.insumo.update({
+                where: { id: extra.insumoId },
+                data: { stockActual: { increment: count } },
+              });
+            } else {
+              await tx.extra.update({
+                where: { id: extraId },
+                data: { stockActual: { increment: count } },
+              });
+            }
+          }
+        }
+
+        if (detalle.aderezos && detalle.aderezos.length > 0) {
+          for (const aderezo of detalle.aderezos) {
+            await tx.aderezo.update({
+              where: { id: aderezo.id },
+              data: { stockActual: { increment: detalle.cantidad } },
+            });
+          }
+        }
+
+        if (detalle.producto.receta && detalle.producto.receta.length > 0) {
+          for (const recetaItem of detalle.producto.receta) {
+            const cantidadRestaurar = recetaItem.cantidad * detalle.cantidad;
+            await tx.insumo.update({
+              where: { id: recetaItem.insumoId },
+              data: { stockActual: { increment: cantidadRestaurar } },
+            });
+          }
+        }
+      }
+
+      return tx.pedido.update({
+        where: { id },
+        data: {
+          estado: EstadoPedido.CANCELADO,
+          motivoCancelacion: motivoLimpio,
+          canceladoPor: rol,
+        },
+      });
     });
   }
 
@@ -442,6 +780,36 @@ export class PedidosService {
             ? undefined
             : dto.numeroCliente?.trim?.() || null,
       },
+    });
+  }
+
+  async setCostoEnvio(id: string, costoEnvio: number) {
+    const pedido = await this.prisma.pedido.findUnique({
+      where: { id },
+      select: { id: true, estado: true, tipo: true },
+    });
+
+    if (!pedido) throw new NotFoundException('Pedido no encontrado');
+
+    if (
+      pedido.estado === EstadoPedido.ENTREGADO ||
+      pedido.estado === EstadoPedido.CANCELADO
+    ) {
+      throw new BadRequestException(
+        'No se puede modificar el costo de envío de un pedido cerrado',
+      );
+    }
+
+    const costoEnvioNum = Number(costoEnvio);
+    if (!Number.isFinite(costoEnvioNum) || costoEnvioNum < 0) {
+      throw new BadRequestException(
+        'El costo de envío debe ser un número válido mayor o igual a 0',
+      );
+    }
+
+    return this.prisma.pedido.update({
+      where: { id },
+      data: { costoEnvio: costoEnvioNum },
     });
   }
 }

@@ -1,4 +1,10 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Min } from "class-validator";
+import {
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export class UpdateExtraDto {
   @IsOptional()
@@ -22,4 +28,12 @@ export class UpdateExtraDto {
   @IsOptional()
   @IsString()
   categoria?: string;
+
+  @IsOptional()
+  @IsString()
+  unidadMedida?: string;
+
+  @IsOptional()
+  @IsString()
+  insumoId?: string | null;
 }

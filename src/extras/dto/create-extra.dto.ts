@@ -3,6 +3,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsArray,
   Min,
 } from 'class-validator';
 
@@ -35,4 +36,9 @@ export class CreateExtraDto {
   @IsOptional()
   @IsString()
   insumoId?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  categoriaIds?: string[];
 }

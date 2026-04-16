@@ -74,4 +74,16 @@ export class CategoriasController {
   borrar(@Param('id') id: string) {
     return this.service.borrar(id);
   }
+
+  @Post('reordenar')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Reordenar categorías',
+    description: 'Actualiza el orden de múltiples categorías a la vez.',
+  })
+  reordenar(
+    @Body() body: { ordenes: { id: string; orden: number }[] },
+  ) {
+    return this.service.actualizarOrden(body.ordenes);
+  }
 }

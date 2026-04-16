@@ -36,7 +36,7 @@ export class ExtrasService {
       }
     }
 
-    return this.prisma.extra.create({
+    const extra = await this.prisma.extra.create({
       data: {
         nombre,
         precio: dto.precio !== undefined ? Number(dto.precio) : 500,
@@ -50,14 +50,27 @@ export class ExtrasService {
       include: {
         insumo: true,
         preciosPorCategoria: { include: { categoria: true } },
+        categoriasAplica: { include: { categoria: true } },
       },
     });
+
+    if (dto.categoriaIds && dto.categoriaIds.length > 0) {
+      await this.prisma.extraCategoria.createMany({
+        data: dto.categoriaIds.map((catId) => ({
+          extraId: extra.id,
+          categoriaId: catId,
+        })),
+      });
+    }
+
+    return this.findOne(extra.id);
   }
 
   async findAll(opts?: {
     incluirInactivos?: boolean;
     soloDisponibles?: boolean;
     categoria?: string;
+    categoriaId?: string;
   }) {
     const incluirInactivos = Boolean(opts?.incluirInactivos);
     const soloDisponibles = Boolean(opts?.soloDisponibles);
@@ -74,8 +87,32 @@ export class ExtrasService {
       include: {
         insumo: true,
         preciosPorCategoria: { include: { categoria: true } },
+        categoriasAplica: { include: { categoria: true } },
       },
       orderBy: [{ categoria: 'asc' }, { nombre: 'asc' }],
+    });
+  }
+
+  async findByCategoriaProducto(categoriaProductoId: string) {
+    return this.prisma.extra.findMany({
+      where: {
+        activo: true,
+        stockActual: { gt: 0 },
+        OR: [
+          { categoriasAplica: { none: {} } },
+          {
+            categoriasAplica: {
+              some: { categoriaId: categoriaProductoId },
+            },
+          },
+        ],
+      },
+      include: {
+        insumo: true,
+        preciosPorCategoria: { include: { categoria: true } },
+        categoriasAplica: { include: { categoria: true } },
+      },
+      orderBy: { nombre: 'asc' },
     });
   }
 
@@ -85,6 +122,7 @@ export class ExtrasService {
       include: {
         insumo: true,
         preciosPorCategoria: { include: { categoria: true } },
+        categoriasAplica: { include: { categoria: true } },
       },
     });
     if (!e) throw new NotFoundException('Extra no encontrado');
@@ -170,14 +208,34 @@ export class ExtrasService {
       insumoId: dto.insumoId !== undefined ? dto.insumoId : undefined,
     };
 
-    return this.prisma.extra.update({
+    const extra = await this.prisma.extra.update({
       where: { id },
       data,
       include: {
         insumo: true,
         preciosPorCategoria: { include: { categoria: true } },
+        categoriasAplica: { include: { categoria: true } },
       },
     });
+
+    if (dto.categoriaIds !== undefined) {
+      await this.prisma.extraCategoria.deleteMany({
+        where: { extraId: id },
+      });
+
+      if (dto.categoriaIds.length > 0) {
+        await this.prisma.extraCategoria.createMany({
+          data: dto.categoriaIds.map((catId) => ({
+            extraId: id,
+            categoriaId: catId,
+          })),
+        });
+      }
+
+      return this.findOne(id);
+    }
+
+    return extra;
   }
 
   async setActivo(id: string, activo: boolean) {

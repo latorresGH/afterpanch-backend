@@ -22,6 +22,7 @@ export class ProductosService {
         nombre: datos.nombre.trim(),
         precio: Number(datos.precio),
         descripcion: datos.descripcion ?? null,
+        imagenUrl: datos.imagenUrl ?? null,
         codigo: datos.codigo ?? null,
         tiempoPreparacionMin:
           datos.tiempoPreparacionMin !== undefined &&
@@ -51,7 +52,7 @@ export class ProductosService {
         categoria: true,
         receta: { include: { insumo: true } },
       },
-      orderBy: { nombre: 'asc' },
+      orderBy: [{ categoria: { orden: 'asc' } }, { nombre: 'asc' }],
     });
   }
 
@@ -102,6 +103,13 @@ export class ProductosService {
                 : String(productoData.descripcion)
               : undefined,
 
+          imagenUrl:
+            productoData.imagenUrl !== undefined
+              ? productoData.imagenUrl === null || productoData.imagenUrl === ''
+                ? null
+                : String(productoData.imagenUrl)
+              : undefined,
+
           codigo:
             productoData.codigo !== undefined
               ? productoData.codigo === ''
@@ -116,7 +124,6 @@ export class ProductosService {
                 : Number(productoData.tiempoPreparacionMin)
               : undefined,
 
-          // ✅ RELACIÓN: connect / disconnect (UNA sola forma)
           categoria:
             categoriaId !== undefined
               ? categoriaId

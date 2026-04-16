@@ -72,6 +72,17 @@ export class ExtrasController {
     });
   }
 
+  @Get('por-categoria-producto/:categoriaId')
+  @Public()
+  @ApiOperation({
+    summary: 'Obtener extras disponibles para una categoría de producto',
+    description:
+      'Retorna extras que aplican a una categoría específica o que son globales (sin categoría asignada).',
+  })
+  findByCategoriaProducto(@Param('categoriaId') categoriaId: string) {
+    return this.extras.findByCategoriaProducto(categoriaId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener extra por ID' })
   findOne(@Param('id') id: string) {

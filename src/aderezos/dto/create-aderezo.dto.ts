@@ -3,6 +3,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsNumber,
+  IsArray,
   Min,
 } from 'class-validator';
 
@@ -15,4 +16,9 @@ export class CreateAderezoDto {
   @IsNumber()
   @Min(0)
   stockActual?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  categoriaIds?: string[];
 }

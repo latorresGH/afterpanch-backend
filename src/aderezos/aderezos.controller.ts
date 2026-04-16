@@ -67,6 +67,17 @@ export class AderezosController {
     });
   }
 
+  @Get('por-categoria-producto/:categoriaId')
+  @Public()
+  @ApiOperation({
+    summary: 'Obtener aderezos disponibles para una categoría de producto',
+    description:
+      'Retorna aderezos que aplican a una categoría específica o que son globales (sin categoría asignada).',
+  })
+  findByCategoriaProducto(@Param('categoriaId') categoriaId: string) {
+    return this.aderezosService.findByCategoriaProducto(categoriaId);
+  }
+
   @Get(':id')
   @Roles(Role.ADMIN, Role.TRABAJADOR)
   @ApiOperation({ summary: 'Obtener aderezo por ID' })
@@ -79,7 +90,7 @@ export class AderezosController {
   @ApiOperation({ summary: 'Actualizar aderezo' })
   update(
     @Param('id') id: string,
-    @Body() dto: { nombre?: string; stockActual?: number; activo?: boolean },
+    @Body() dto: { nombre?: string; stockActual?: number; activo?: boolean; categoriaIds?: string[] },
   ) {
     return this.aderezosService.update(id, dto);
   }

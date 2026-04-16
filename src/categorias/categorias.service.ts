@@ -12,11 +12,17 @@ export class CategoriasService {
   constructor(private prisma: PrismaService) {}
 
   async crear(dto: CreateCategoriaDto) {
+    const maxOrden = await this.prisma.categoria.aggregate({
+      _max: { orden: true },
+    });
+    const orden = dto.orden ?? (maxOrden._max.orden ?? 0) + 1;
+    
     return this.prisma.categoria.create({
       data: {
         nombre: dto.nombre.trim(),
         descripcion: dto.descripcion?.trim() ?? null,
         activo: dto.activo ?? true,
+        orden,
       },
     });
   }
@@ -24,7 +30,7 @@ export class CategoriasService {
   async listar(incluirInactivas = false) {
     return this.prisma.categoria.findMany({
       where: incluirInactivas ? {} : { activo: true },
-      orderBy: { nombre: 'asc' },
+      orderBy: { orden: 'asc' },
     });
   }
 
@@ -71,6 +77,17 @@ export class CategoriasService {
     }
 
     return this.prisma.categoria.delete({ where: { id } });
+  }
+
+  async actualizarOrden(ordenes: { id: string; orden: number }[]) {
+    return this.prisma.$transaction(
+      ordenes.map(({ id, orden }) =>
+        this.prisma.categoria.update({
+          where: { id },
+          data: { orden },
+        }),
+      ),
+    );
   }
 
   private async ensureExists(id: string) {

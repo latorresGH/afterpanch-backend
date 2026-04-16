@@ -69,9 +69,12 @@ model Categoria {
   nombre      String   @unique
   descripcion String?
   activo      Boolean  @default(true)
-  productos   Producto[]
-  preciosAderezos AderezoPrecio[]
-  preciosExtras   ExtraPrecio[]
+  orden       Int      @default(0)
+  productos        Producto[]
+  preciosAderezos  AderezoPrecio[]
+  preciosExtras    ExtraPrecio[]
+  extrasCategoria  ExtraCategoria[]
+  aderezosCategoria AderezoCategoria[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -79,20 +82,21 @@ model Categoria {
 // --- PRODUCTOS Y RECETAS DINÁMICAS ---
 
 model Producto {
-  id                String            @id @default(uuid())
-  nombre            String // Ej: "Hamburguesa Cuádruple"
-  precio            Float
-  esParaVenta       Boolean           @default(true)
-  activo            Boolean           @default(true)
-  descripcion       String?
-  codigo            String?           @unique
+  id                  String   @id @default(uuid())
+  nombre              String
+  precio              Float
+  esParaVenta         Boolean  @default(true)
+  activo              Boolean  @default(true)
+  descripcion         String?
+  imagenUrl           String?
+  codigo              String?  @unique
   tiempoPreparacionMin Int?
-  categoriaId       String?
-  categoria         Categoria?        @relation(fields: [categoriaId], references: [id])
-  receta            ProductoReceta[]
-  detalles          PedidoDetalle[]
-  ofertaProductos   OfertaProducto[]
-  grupoOpciones     GrupoOpcion[]
+  categoriaId         String?
+  categoria           Categoria? @relation(fields: [categoriaId], references: [id])
+  receta              ProductoReceta[]
+  detalles            PedidoDetalle[]
+  ofertaProductos     OfertaProducto[]
+  grupoOpciones       GrupoOpcion[]
 }
 
 // Tabla intermedia para la "Receta" (Escandallo)
@@ -192,25 +196,33 @@ model PedidoDetalle {
 // --- GESTIÓN DE EXTRAS ---
 
 model Extra {
-  id        String   @id @default(uuid())
-  nombre    String   @unique
-  precio    Float    @default(500) // precio base (legacy, usar si no hay preciosPorCategoria)
-  unidadMedida String @default("un") // un | sobre | ml | gr | etc
-  stockActual Float @default(0)
-  activo    Boolean  @default(true)
-  categoria String @default("ADEREZOS")
+  id               String   @id @default(uuid())
+  nombre           String   @unique
+  precio           Float    @default(500)
+  unidadMedida     String   @default("un")
+  stockActual      Float    @default(0)
+  activo           Boolean  @default(true)
+  categoria        String   @default("ADEREZOS")
 
-  // Relación OPCIONAL con insumos
-  // Si tiene insumoId, el stock se controla por insumo
-  // Si NO tiene insumoId, el stock se controla por stockActual del extra
-  insumoId  String?
-  insumo    Insumo?  @relation(fields: [insumoId], references: [id])
+  insumoId         String?
+  insumo           Insumo?  @relation(fields: [insumoId], references: [id])
 
-  // Precios por categoría de producto
   preciosPorCategoria ExtraPrecio[]
+  categoriasAplica    ExtraCategoria[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model ExtraCategoria {
+  id         String @id @default(uuid())
+  extraId    String
+  categoriaId String
+
+  extra     Extra     @relation(fields: [extraId], references: [id], onDelete: Cascade)
+  categoria Categoria @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+
+  @@unique([extraId, categoriaId])
 }
 
 model ExtraPrecio {
@@ -226,13 +238,25 @@ model ExtraPrecio {
 }
 
 model Aderezo {
-  id          String   @id @default(uuid())
-  nombre      String   @unique
-  stockActual Float    @default(0)
-  activo      Boolean  @default(true)
+  id               String   @id @default(uuid())
+  nombre           String   @unique
+  stockActual      Float    @default(0)
+  activo           Boolean  @default(true)
 
-  precioPorCategoria AderezoPrecio[]
-  detalles           PedidoDetalle[]
+  precioPorCategoria  AderezoPrecio[]
+  categoriasAplica    AderezoCategoria[]
+  detalles            PedidoDetalle[]
+}
+
+model AderezoCategoria {
+  id          String @id @default(uuid())
+  aderezoId   String
+  categoriaId String
+
+  aderezo   Aderezo   @relation(fields: [aderezoId], references: [id], onDelete: Cascade)
+  categoria Categoria @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+
+  @@unique([aderezoId, categoriaId])
 }
 
 // ============================================

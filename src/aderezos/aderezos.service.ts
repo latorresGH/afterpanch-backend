@@ -12,14 +12,28 @@ export class AderezosService {
   constructor(private prisma: PrismaService) {}
 
   async create(createAderezoDto: CreateAderezoDto) {
-    return this.prisma.aderezo.create({
+    const aderezo = await this.prisma.aderezo.create({
       data: {
         nombre: createAderezoDto.nombre.trim(),
         stockActual: createAderezoDto.stockActual ?? 999,
         activo: true,
       },
-      include: { precioPorCategoria: { include: { categoria: true } } },
+      include: {
+        precioPorCategoria: { include: { categoria: true } },
+        categoriasAplica: { include: { categoria: true } },
+      },
     });
+
+    if (createAderezoDto.categoriaIds && createAderezoDto.categoriaIds.length > 0) {
+      await this.prisma.aderezoCategoria.createMany({
+        data: createAderezoDto.categoriaIds.map((catId) => ({
+          aderezoId: aderezo.id,
+          categoriaId: catId,
+        })),
+      });
+    }
+
+    return this.findOne(aderezo.id);
   }
 
   async findAll(opts?: {
@@ -38,6 +52,29 @@ export class AderezosService {
         precioPorCategoria: {
           include: { categoria: true },
         },
+        categoriasAplica: { include: { categoria: true } },
+      },
+      orderBy: { nombre: 'asc' },
+    });
+  }
+
+  async findByCategoriaProducto(categoriaProductoId: string) {
+    return this.prisma.aderezo.findMany({
+      where: {
+        activo: true,
+        stockActual: { gt: 0 },
+        OR: [
+          { categoriasAplica: { none: {} } },
+          {
+            categoriasAplica: {
+              some: { categoriaId: categoriaProductoId },
+            },
+          },
+        ],
+      },
+      include: {
+        precioPorCategoria: { include: { categoria: true } },
+        categoriasAplica: { include: { categoria: true } },
       },
       orderBy: { nombre: 'asc' },
     });
@@ -50,6 +87,7 @@ export class AderezosService {
         precioPorCategoria: {
           include: { categoria: true },
         },
+        categoriasAplica: { include: { categoria: true } },
       },
     });
 
@@ -102,11 +140,11 @@ export class AderezosService {
 
   async update(
     id: string,
-    dto: { nombre?: string; stockActual?: number; activo?: boolean },
+    dto: { nombre?: string; stockActual?: number; activo?: boolean; categoriaIds?: string[] },
   ) {
     await this.findOne(id);
 
-    return this.prisma.aderezo.update({
+    const aderezo = await this.prisma.aderezo.update({
       where: { id },
       data: {
         ...(dto.nombre !== undefined && { nombre: dto.nombre.trim() }),
@@ -115,8 +153,30 @@ export class AderezosService {
         }),
         ...(dto.activo !== undefined && { activo: dto.activo }),
       },
-      include: { precioPorCategoria: { include: { categoria: true } } },
+      include: {
+        precioPorCategoria: { include: { categoria: true } },
+        categoriasAplica: { include: { categoria: true } },
+      },
     });
+
+    if (dto.categoriaIds !== undefined) {
+      await this.prisma.aderezoCategoria.deleteMany({
+        where: { aderezoId: id },
+      });
+
+      if (dto.categoriaIds.length > 0) {
+        await this.prisma.aderezoCategoria.createMany({
+          data: dto.categoriaIds.map((catId) => ({
+            aderezoId: id,
+            categoriaId: catId,
+          })),
+        });
+      }
+
+      return this.findOne(id);
+    }
+
+    return aderezo;
   }
 
   async setActivo(id: string, activo: boolean) {

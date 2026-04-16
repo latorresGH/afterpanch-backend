@@ -3,6 +3,8 @@ import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 
+process.env.TZ = 'America/Argentina/Buenos_Aires';
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 

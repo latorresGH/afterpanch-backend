@@ -279,12 +279,6 @@ export class PedidosService {
           }
         });
 
-        expanded.sort((a, b) => {
-          const precioA = this.getExtraPrecio(a.extra, categoriaId);
-          const precioB = this.getExtraPrecio(b.extra, categoriaId);
-          return precioB - precioA;
-        });
-
         for (let idx = 0; idx < expanded.length; idx++) {
           const { extraId, extra } = expanded[idx];
           const precioExtra = this.getExtraPrecio(extra, categoriaId);

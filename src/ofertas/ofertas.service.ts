@@ -12,6 +12,11 @@ import { EstadoOferta, TipoOferta } from '@prisma/client';
 export class OfertasService {
   constructor(private prisma: PrismaService) {}
 
+  private parseFechaLocal(fechaStr: string): Date {
+    const [year, month, day] = fechaStr.split('-').map(Number);
+    return new Date(year, month - 1, day, 0, 0, 0, 0);
+  }
+
   async crear(dto: CreateOfertaDto) {
     if (
       dto.tipo === TipoOferta.DESCUENTO_PORCENTAJE &&
@@ -42,8 +47,8 @@ export class OfertasService {
           descripcion: dto.descripcion?.trim() || null,
           tipo: dto.tipo,
           estado: dto.estado || EstadoOferta.ACTIVA,
-          fechaInicio: new Date(dto.fechaInicio),
-          fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : null,
+          fechaInicio: this.parseFechaLocal(dto.fechaInicio),
+          fechaFin: dto.fechaFin ? this.parseFechaLocal(dto.fechaFin) : null,
           activa: dto.activa ?? true,
           porcentajeDescuento: dto.porcentajeDescuento ?? null,
           montoDescuento: dto.montoDescuento ?? null,
@@ -138,8 +143,8 @@ export class OfertasService {
           nombre: dto.nombre?.trim(),
           descripcion: dto.descripcion?.trim() || null,
           estado: dto.estado,
-          fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : undefined,
-          fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : undefined,
+          fechaInicio: dto.fechaInicio ? this.parseFechaLocal(dto.fechaInicio) : undefined,
+          fechaFin: dto.fechaFin ? this.parseFechaLocal(dto.fechaFin) : undefined,
           activa: dto.activa,
           porcentajeDescuento: dto.porcentajeDescuento,
           montoDescuento: dto.montoDescuento,

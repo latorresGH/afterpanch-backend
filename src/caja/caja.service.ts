@@ -93,8 +93,16 @@ export class CajaService {
 
     if (fechaInicio || fechaFin) {
       where.fechaConfirmacion = {};
-      if (fechaInicio) where.fechaConfirmacion.gte = fechaInicio;
-      if (fechaFin) where.fechaConfirmacion.lte = fechaFin;
+      if (fechaInicio) {
+        const inicio = new Date(fechaInicio);
+        inicio.setHours(0, 0, 0, 0);
+        where.fechaConfirmacion.gte = inicio;
+      }
+      if (fechaFin) {
+        const fin = new Date(fechaFin);
+        fin.setHours(23, 59, 59, 999);
+        where.fechaConfirmacion.lte = fin;
+      }
     }
 
     const movimientos = await this.prisma.cajaMovimiento.findMany({

@@ -16,11 +16,15 @@ export class InsumosService {
     unidad: string,
     proveedorId: string | null,
   ) {
+    const nombreLimpio = (nombre || '').trim();
+    const unidadLimpia = (unidad || 'unidades').trim();
+    const stock = Number(stockInicial) || 0;
+
     return this.prisma.insumo.create({
       data: {
-        nombre: nombre.trim(),
-        stockActual: Number(stockInicial),
-        unidadMedida: unidad.trim(),
+        nombre: nombreLimpio,
+        stockActual: stock,
+        unidadMedida: unidadLimpia,
         activo: true,
         proveedor: proveedorId ? { connect: { id: proveedorId } } : undefined,
       },

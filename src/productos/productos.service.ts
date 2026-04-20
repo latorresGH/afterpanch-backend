@@ -71,16 +71,16 @@ export class ProductosService {
   async update(id: string, dto: any) {
     await this.ensureExists(id);
 
-    const { receta, categoriaId, ...productoData } = dto;
+const { receta, categoriaId, ...productoData } = dto;
 
-    // validar categoriaId si viene y no es vacío
-    if (categoriaId) {
-      const cat = await this.prisma.categoria.findUnique({
-        where: { id: categoriaId },
-        select: { id: true },
-      });
-      if (!cat) throw new BadRequestException('Categoría inválida');
-    }
+// validar categoriaId si viene y no es vacío ni null
+if (categoriaId && categoriaId !== null) {
+const cat = await this.prisma.categoria.findUnique({
+where: { id: categoriaId },
+select: { id: true },
+});
+if (!cat) throw new BadRequestException('Categoría inválida');
+}
 
     return this.prisma.$transaction(async (tx) => {
       await tx.producto.update({

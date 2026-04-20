@@ -21,13 +21,17 @@ export class UpdateProductoDto {
   @IsString()
   categoriaId?: string;
 
-  @IsOptional()
-  @IsString()
-  descripcion?: string | null;
+@IsOptional()
+@IsString()
+descripcion?: string | null;
 
-  @IsOptional()
-  @IsString()
-  codigo?: string | null;
+@IsOptional()
+@IsString()
+imagenUrl?: string | null;
+
+@IsOptional()
+@IsString()
+codigo?: string | null;
 
   @IsOptional()
   @IsInt()

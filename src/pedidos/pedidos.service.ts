@@ -7,6 +7,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { CreatePedidoDto, TipoPedidoDto } from './dto/create-pedido.dto';
 import { EstadoPedido, Prisma, Role, MetodoPago } from '@prisma/client';
 import { OfertasCalculatorService } from '../ofertas/ofertas-calculator.service';
+import { NegocioConfigService } from '../config/config.service';
 
 const ESTADOS_ABIERTOS: EstadoPedido[] = [
   EstadoPedido.PENDIENTE,
@@ -20,9 +21,37 @@ export class PedidosService {
   constructor(
     private prisma: PrismaService,
     private ofertasCalculator: OfertasCalculatorService,
+    private configService: NegocioConfigService,
   ) {}
 
   async crearPedido(dto: CreatePedidoDto) {
+    const horaAperturaStr = await this.configService.obtener('hora_apertura');
+    const horaCierreStr = await this.configService.obtener('hora_cierre');
+
+    if (horaAperturaStr && horaCierreStr) {
+      const ahora = new Date();
+      const opciones: Intl.DateTimeFormatOptions = {
+        timeZone: 'America/Argentina/Mendoza',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      };
+      const horaActualStr = ahora.toLocaleTimeString('es-AR', opciones);
+      const [horaActualHoras, horaActualMinutos] = horaActualStr.split(':').map(Number);
+      const horaActual = horaActualHoras * 60 + horaActualMinutos;
+
+      const [horaAp, minAp] = horaAperturaStr.split(':').map(Number);
+      const [horaCi, minCi] = horaCierreStr.split(':').map(Number);
+      const horaApertura = horaAp * 60 + (minAp || 0);
+      const horaCierre = horaCi * 60 + (minCi || 0);
+
+      if (horaActual < horaApertura || horaActual >= horaCierre) {
+        throw new BadRequestException(
+          `Estamos cerrados. Horario de atención: ${horaAperturaStr} a ${horaCierreStr}`,
+        );
+      }
+    }
+
     const {
       tipo,
       direccion,

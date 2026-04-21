@@ -8,6 +8,7 @@ import { CreatePedidoDto, TipoPedidoDto } from './dto/create-pedido.dto';
 import { EstadoPedido, Prisma, Role, MetodoPago } from '@prisma/client';
 import { OfertasCalculatorService } from '../ofertas/ofertas-calculator.service';
 import { NegocioConfigService } from '../config/config.service';
+import { PedidosGateway } from './pedidos.gateway';
 
 const ESTADOS_ABIERTOS: EstadoPedido[] = [
   EstadoPedido.PENDIENTE,
@@ -22,6 +23,7 @@ export class PedidosService {
     private prisma: PrismaService,
     private ofertasCalculator: OfertasCalculatorService,
     private configService: NegocioConfigService,
+    private pedidosGateway: PedidosGateway,
   ) {}
 
   async crearPedido(dto: CreatePedidoDto) {
@@ -518,6 +520,15 @@ export class PedidosService {
           calculoOfertas,
         );
 
+        this.pedidosGateway.notificarNuevoPedido({
+          id: pedidoActualizado.id,
+          nombreCliente: pedidoActualizado.nombreCliente || nombreClienteLimpio || '',
+          apellidoCliente: pedidoActualizado.apellidoCliente || apellidoClienteLimpio || '',
+          numeroCliente: pedidoActualizado.numeroCliente || numeroClienteLimpio || '',
+          tipo,
+          total: pedidoActualizado.total,
+        });
+
         return pedidoActualizado;
       }
 
@@ -538,6 +549,15 @@ export class PedidosService {
       });
 
       await this.registrarOfertasAplicadas(tx, pedidoNuevo.id, calculoOfertas);
+
+      this.pedidosGateway.notificarNuevoPedido({
+        id: pedidoNuevo.id,
+        nombreCliente: pedidoNuevo.nombreCliente || nombreClienteLimpio || '',
+        apellidoCliente: pedidoNuevo.apellidoCliente || apellidoClienteLimpio || '',
+        numeroCliente: pedidoNuevo.numeroCliente || numeroClienteLimpio || '',
+        tipo,
+        total: pedidoNuevo.total,
+      });
 
       return pedidoNuevo;
     });

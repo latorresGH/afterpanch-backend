@@ -133,6 +133,13 @@ export class CreatePedidoDto {
   @IsString()
   pedidoId?: string;
 
+  @ApiPropertyOptional({
+    description: 'Origen del pedido (MENU = pedido web, no se envía desde POS)',
+  })
+  @IsOptional()
+  @IsString()
+  origen?: string;
+
   @ApiProperty({ description: 'Detalles del pedido', type: [PedidoDetalleDto] })
   @IsArray()
   @ValidateNested({ each: true })

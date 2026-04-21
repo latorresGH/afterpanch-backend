@@ -54,17 +54,18 @@ export class PedidosService {
       }
     }
 
-    const {
-      tipo,
-      direccion,
-      detalles,
-      pedidoId,
-      nombreCliente,
-      apellidoCliente,
-      metodoPago,
-      numeroCliente,
-      costoEnvio,
-    } = dto;
+  const {
+    tipo,
+    direccion,
+    detalles,
+    pedidoId,
+    nombreCliente,
+    apellidoCliente,
+    metodoPago,
+    numeroCliente,
+    costoEnvio,
+    origen,
+  } = dto;
 
     if (!detalles || detalles.length === 0) {
       throw new BadRequestException('El pedido no tiene productos');
@@ -520,14 +521,16 @@ export class PedidosService {
           calculoOfertas,
         );
 
-        this.pedidosGateway.notificarNuevoPedido({
-          id: pedidoActualizado.id,
-          nombreCliente: pedidoActualizado.nombreCliente || nombreClienteLimpio || '',
-          apellidoCliente: pedidoActualizado.apellidoCliente || apellidoClienteLimpio || '',
-          numeroCliente: pedidoActualizado.numeroCliente || numeroClienteLimpio || '',
-          tipo,
-          total: pedidoActualizado.total,
-        });
+        if (origen === 'MENU') {
+          this.pedidosGateway.notificarNuevoPedido({
+            id: pedidoActualizado.id,
+            nombreCliente: pedidoActualizado.nombreCliente || nombreClienteLimpio || '',
+            apellidoCliente: pedidoActualizado.apellidoCliente || apellidoClienteLimpio || '',
+            numeroCliente: pedidoActualizado.numeroCliente || numeroClienteLimpio || '',
+            tipo,
+            total: pedidoActualizado.total,
+          });
+        }
 
         return pedidoActualizado;
       }
@@ -550,14 +553,16 @@ export class PedidosService {
 
       await this.registrarOfertasAplicadas(tx, pedidoNuevo.id, calculoOfertas);
 
-      this.pedidosGateway.notificarNuevoPedido({
-        id: pedidoNuevo.id,
-        nombreCliente: pedidoNuevo.nombreCliente || nombreClienteLimpio || '',
-        apellidoCliente: pedidoNuevo.apellidoCliente || apellidoClienteLimpio || '',
-        numeroCliente: pedidoNuevo.numeroCliente || numeroClienteLimpio || '',
-        tipo,
-        total: pedidoNuevo.total,
-      });
+      if (origen === 'MENU') {
+        this.pedidosGateway.notificarNuevoPedido({
+          id: pedidoNuevo.id,
+          nombreCliente: pedidoNuevo.nombreCliente || nombreClienteLimpio || '',
+          apellidoCliente: pedidoNuevo.apellidoCliente || apellidoClienteLimpio || '',
+          numeroCliente: pedidoNuevo.numeroCliente || numeroClienteLimpio || '',
+          tipo,
+          total: pedidoNuevo.total,
+        });
+      }
 
       return pedidoNuevo;
     });

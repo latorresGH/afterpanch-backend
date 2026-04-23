@@ -54,18 +54,28 @@ export class PedidosService {
       }
     }
 
-  const {
-    tipo,
-    direccion,
-    detalles,
-    pedidoId,
-    nombreCliente,
-    apellidoCliente,
-    metodoPago,
-    numeroCliente,
-    costoEnvio,
-    origen,
-  } = dto;
+    const {
+      tipo,
+      direccion,
+      detalles,
+      pedidoId,
+      nombreCliente,
+      apellidoCliente,
+      metodoPago,
+      numeroCliente,
+      costoEnvio,
+      origen,
+      direccionLat,
+      direccionLng,
+      direccionFormateada,
+      piso,
+      departamento,
+      referencias,
+      notasRepartidor,
+  shippingZoneName,
+  shippingReason,
+  direccionPrecision,
+} = dto;
 
     if (!detalles || detalles.length === 0) {
       throw new BadRequestException('El pedido no tiene productos');
@@ -511,7 +521,17 @@ export class PedidosService {
               ? { metodoPago: metodoPago as MetodoPago }
               : {}),
             ...(costoEnvio !== undefined ? { costoEnvio } : {}),
-          },
+            ...(direccionLat !== undefined ? { direccionLat } : {}),
+            ...(direccionLng !== undefined ? { direccionLng } : {}),
+            ...(direccionFormateada !== undefined ? { direccionFormateada } : {}),
+            ...(piso !== undefined ? { piso } : {}),
+            ...(departamento !== undefined ? { departamento } : {}),
+            ...(referencias !== undefined ? { referencias } : {}),
+            ...(notasRepartidor !== undefined ? { notasRepartidor } : {}),
+            ...(shippingZoneName !== undefined ? { shippingZoneName } : {}),
+  ...(shippingReason !== undefined ? { shippingReason } : {}),
+  ...(direccionPrecision !== undefined ? { direccionPrecision } : {}),
+},
           include: includeConfig,
         });
 
@@ -535,21 +555,31 @@ export class PedidosService {
         return pedidoActualizado;
       }
 
-      const pedidoNuevo = await tx.pedido.create({
-        data: {
-          tipo,
-          nombreCliente: nombreClienteLimpio!,
-          apellidoCliente: apellidoClienteLimpio,
-          metodoPago: (metodoPago as MetodoPago) ?? null,
-          numeroCliente: numeroClienteLimpio,
-          direccion: tipo === TipoPedidoDto.DELIVERY ? direccion!.trim() : null,
-          costoEnvio: costoEnvio ?? 0,
-          total: totalConOfertas,
-          estado: EstadoPedido.PENDIENTE,
-          detalles: { create: detallesCreate },
-        },
-        include: includeConfig,
-      });
+    const pedidoNuevo = await tx.pedido.create({
+      data: {
+        tipo,
+        nombreCliente: nombreClienteLimpio!,
+        apellidoCliente: apellidoClienteLimpio,
+        metodoPago: (metodoPago as MetodoPago) ?? null,
+        numeroCliente: numeroClienteLimpio,
+        direccion: tipo === TipoPedidoDto.DELIVERY ? direccion!.trim() : null,
+        costoEnvio: costoEnvio ?? 0,
+        direccionLat: direccionLat ?? null,
+        direccionLng: direccionLng ?? null,
+        direccionFormateada: direccionFormateada ?? null,
+        piso: piso ?? null,
+        departamento: departamento ?? null,
+        referencias: referencias ?? null,
+        notasRepartidor: notasRepartidor ?? null,
+  shippingZoneName: shippingZoneName ?? null,
+  shippingReason: shippingReason ?? null,
+  direccionPrecision: direccionPrecision ?? null,
+  total: totalConOfertas,
+        estado: EstadoPedido.PENDIENTE,
+        detalles: { create: detallesCreate },
+      },
+      include: includeConfig,
+    });
 
       await this.registrarOfertasAplicadas(tx, pedidoNuevo.id, calculoOfertas);
 

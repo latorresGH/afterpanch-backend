@@ -17,6 +17,7 @@ import { CajaModule } from './caja/caja.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { NegocioConfigModule } from './config/config.module';
+import { ShippingModule } from './shipping/shipping.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 
@@ -61,6 +62,7 @@ function validateEnv(config: Record<string, string>) {
     OfertasModule,
     CajaModule,
     NegocioConfigModule,
+    ShippingModule,
   ],
   controllers: [AppController],
   providers: [

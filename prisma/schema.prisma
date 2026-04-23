@@ -149,28 +149,39 @@ enum MetodoPago {
 }
 
 model Pedido {
-  id String @id @default(uuid())
-  tipo TipoPedido @default(LOCAL)
-  estado EstadoPedido @default(PENDIENTE)
-  total Float @default(0)
+  id           String        @id @default(uuid())
+  tipo         TipoPedido    @default(LOCAL)
+  estado       EstadoPedido  @default(PENDIENTE)
+  total        Float         @default(0)
 
-  nombreCliente String?
+  nombreCliente   String?
   apellidoCliente String?
-  numeroCliente String?
-  metodoPago MetodoPago?
+  numeroCliente   String?
+  metodoPago      MetodoPago?
 
-  direccion String?
-  costoEnvio Float @default(0)
-  motivoCancelacion String?
-  canceladoPor Role?
+  direccion            String?
+  costoEnvio           Float         @default(0)
+  motivoCancelacion    String?
+  canceladoPor         Role?
+
+  direccionLat         Float?
+  direccionLng         Float?
+  direccionFormateada  String?
+  piso                 String?
+  departamento         String?
+  referencias          String?
+  notasRepartidor      String?
+  shippingZoneName String?
+  shippingReason String?
+  direccionPrecision String?
 
   repartidorId String?
-  repartidor User? @relation("RepartidorPedidos", fields: [repartidorId], references: [id])
+  repartidor   User?         @relation("RepartidorPedidos", fields: [repartidorId], references: [id])
 
-  detalles PedidoDetalle[]
+  detalles         PedidoDetalle[]
   ofertasAplicadas PedidoOferta[]
-  movimientosCaja CajaMovimiento[]
-  createdAt DateTime @default(now())
+  movimientosCaja  CajaMovimiento[]
+  createdAt        DateTime      @default(now())
 }
 
 model PedidoDetalle {
@@ -402,10 +413,66 @@ model CajaMovimiento {
 // --- CONFIGURACIÓN DEL NEGOCIO ---
 
 model Configuracion {
-  id String @id @default(uuid())
-  clave String @unique // Ej: "alias_transferencia", "whatsapp_numero"
-  valor String // Ej: "after.panch", "+5491123456789"
+  id          String   @id @default(uuid())
+  clave       String   @unique // Ej: "alias_transferencia", "whatsapp_numero"
+  valor       String // Ej: "after.panch", "+5491123456789"
   descripcion String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// --- SISTEMA DE ENVÍOS ---
+
+enum ShippingMode {
+  RADIUS
+  POLYGON
+  RADIUS_TIERS
+}
+
+model ShippingConfig {
+  id                   String       @id @default(uuid())
+  mode                 ShippingMode @default(RADIUS)
+  localLat             Float
+  localLng             Float
+  radiusKm             Float        @default(5)
+  radiusPrice          Float        @default(0)
+  maxDeliveryRadiusKm  Float        @default(10)
+  borderToleranceMeters Int         @default(500)
+  updatedAt            DateTime     @updatedAt
+}
+
+model ShippingZone {
+  id        String   @id @default(uuid())
+  name      String
+  price     Float
+  polygon   Json     // GeoJSON: { type: "Polygon", coordinates: [[[lng,lat],...]] }
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model GeocodingCache {
+  id String @id @default(uuid())
+  normalizedKey String @unique
+  formattedAddress String
+  lat Float
+  lng Float
+  importance Float @default(1)
+  precision String @default("exact")
+  hitCount Int @default(1)
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime @updatedAt
+
+  @@index([normalizedKey])
+}
+
+model ShippingRadiusTier {
+  id        String   @id @default(uuid())
+  fromKm    Float
+  toKm      Float
+  price     Float
+  order     Int      @default(0)
+  active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

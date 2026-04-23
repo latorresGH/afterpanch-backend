@@ -126,6 +126,58 @@ export class CreatePedidoDto {
   @Min(0)
   costoEnvio?: number;
 
+  @ApiPropertyOptional({ description: 'Latitud de la dirección del cliente' })
+  @IsOptional()
+  @IsNumber()
+  direccionLat?: number;
+
+  @ApiPropertyOptional({ description: 'Longitud de la dirección del cliente' })
+  @IsOptional()
+  @IsNumber()
+  direccionLng?: number;
+
+  @ApiPropertyOptional({ description: 'Dirección formateada por el geocoder' })
+  @IsOptional()
+  @IsString()
+  direccionFormateada?: string;
+
+  @ApiPropertyOptional({ description: 'Piso del departamento' })
+  @IsOptional()
+  @IsString()
+  piso?: string;
+
+  @ApiPropertyOptional({ description: 'Departamento' })
+  @IsOptional()
+  @IsString()
+  departamento?: string;
+
+  @ApiPropertyOptional({ description: 'Referencias de la dirección' })
+  @IsOptional()
+  @IsString()
+  referencias?: string;
+
+  @ApiPropertyOptional({ description: 'Notas para el repartidor' })
+  @IsOptional()
+  @IsString()
+  notasRepartidor?: string;
+
+  @ApiPropertyOptional({ description: 'Nombre de la zona de envío aplicada (snapshot)' })
+  @IsOptional()
+  @IsString()
+  shippingZoneName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Razón del cálculo de envío: inside | near_border | inside_radius (snapshot)',
+  })
+  @IsOptional()
+  @IsString()
+  shippingReason?: string;
+
+  @ApiPropertyOptional({ description: 'Precisión de la dirección: exact | street | manual' })
+  @IsOptional()
+  @IsString()
+  direccionPrecision?: string;
+
   @ApiPropertyOptional({
     description: 'ID de pedido existente (para agregar más items)',
   })

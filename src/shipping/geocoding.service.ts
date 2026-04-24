@@ -13,6 +13,8 @@ export class GeocodingService {
     private geocodingProvider: GeocodingProvider,
   ) {}
 
+  private readonly CACHE_TTL_DAYS = 90;
+
   async geocode(address: string): Promise<GeocodeResult> {
     console.log(`[GEOCODING] Consulta iniciada: ${address}`);
 
@@ -23,7 +25,7 @@ export class GeocodingService {
       where: { normalizedKey },
     });
 
-    if (cached) {
+    if (cached && (!cached.expiresAt || cached.expiresAt > new Date())) {
       console.log(`[GEOCODING] Cache HIT con precision=${cached.precision}, hitCount=${cached.hitCount}`);
       await this.prisma.geocodingCache.update({
         where: { id: cached.id },
@@ -41,6 +43,11 @@ export class GeocodingService {
         importance: cached.importance,
         precision: cached.precision as 'exact' | 'street' | 'manual',
       };
+    }
+
+    if (cached && cached.expiresAt && cached.expiresAt <= new Date()) {
+      console.log(`[GEOCODING] Cache entry expirada, eliminando: ${normalizedKey}`);
+      await this.prisma.geocodingCache.delete({ where: { id: cached.id } });
     }
 
     const config = await this.prisma.shippingConfig.findFirst();
@@ -101,6 +108,12 @@ export class GeocodingService {
     throw new NotFoundException('No se pudo ubicar esa dirección');
   }
 
+  private getDefaultExpiresAt(): Date {
+    const d = new Date();
+    d.setDate(d.getDate() + this.CACHE_TTL_DAYS);
+    return d;
+  }
+
   private async saveAndReturn(
     result: { lat: number; lng: number; formattedAddress: string; importance: number; precision?: 'exact' | 'street' },
     normalizedKey: string,
@@ -108,6 +121,7 @@ export class GeocodingService {
   ): Promise<GeocodeResult> {
     const precision = result.precision ?? fallbackPrecision;
     const { lat, lng, formattedAddress, importance } = result;
+    const expiresAt = this.getDefaultExpiresAt();
 
     try {
       await this.prisma.geocodingCache.create({
@@ -118,12 +132,13 @@ export class GeocodingService {
           lng,
           importance,
           precision,
+          expiresAt,
         },
       });
     } catch {
       await this.prisma.geocodingCache.update({
         where: { normalizedKey },
-        data: { formattedAddress, lat, lng, importance, precision },
+        data: { formattedAddress, lat, lng, importance, precision, expiresAt },
       });
     }
 
@@ -219,5 +234,45 @@ export class GeocodingService {
     await this.prisma.geocodingCache.delete({ where: { id } });
     console.log(`[GEOCODING] Entrada de caché eliminada: ${entry.normalizedKey}`);
     return { deleted: true, id };
+  }
+
+  async getCacheStats() {
+    const [total, exactCount, streetCount, manualCount, expiredCount] = await Promise.all([
+      this.prisma.geocodingCache.count(),
+      this.prisma.geocodingCache.count({ where: { precision: 'exact' } }),
+      this.prisma.geocodingCache.count({ where: { precision: 'street' } }),
+      this.prisma.geocodingCache.count({ where: { precision: 'manual' } }),
+      this.prisma.geocodingCache.count({ where: { expiresAt: { lte: new Date() } } }),
+    ]);
+
+    return {
+      total,
+      exact: total > 0 ? Math.round((exactCount / total) * 100) : 0,
+      street: total > 0 ? Math.round((streetCount / total) * 100) : 0,
+      manual: total > 0 ? Math.round((manualCount / total) * 100) : 0,
+      expired: expiredCount,
+    };
+  }
+
+  async clearExpiredCache() {
+    const result = await this.prisma.geocodingCache.deleteMany({
+      where: { expiresAt: { lte: new Date() } },
+    });
+    console.log(`[CACHE-ADMIN] ${result.count} entradas expiradas eliminadas`);
+    return { cleared: result.count };
+  }
+
+  async clearAllCache() {
+    const result = await this.prisma.geocodingCache.deleteMany();
+    console.log(`[CACHE-ADMIN] Todo el caché eliminado: ${result.count} entradas`);
+    return { cleared: result.count };
+  }
+
+  async clearCacheByPrecision(precision: string) {
+    const result = await this.prisma.geocodingCache.deleteMany({
+      where: { precision },
+    });
+    console.log(`[CACHE-ADMIN] ${result.count} entradas con precision=${precision} eliminadas`);
+    return { cleared: result.count };
   }
 }

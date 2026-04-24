@@ -44,8 +44,28 @@ model Insumo {
   // ✅ NUEVO: extras que usan este insumo
   extras Extra[]
 
+  // ✅ NUEVO: historial de movimientos de stock
+  movimientos StockMovimiento[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model StockMovimiento {
+  id           String   @id @default(uuid())
+  insumoId     String
+  insumo       Insumo   @relation(fields: [insumoId], references: [id])
+  tipo         String   // DESCUENTO_PEDIDO | AJUSTE_MANUAL | REPOSICION
+  cantidad     Float    // negativo si se descontó, positivo si se repuso
+  stockAntes   Float
+  stockDespues Float
+  pedidoId     String?
+  motivo       String?
+  userId       String?
+  createdAt    DateTime @default(now())
+
+  @@index([insumoId])
+  @@index([createdAt])
 }
 
 model Proveedor {
@@ -140,6 +160,7 @@ enum EstadoPedido {
   EN_CAMINO
   ENTREGADO
   CANCELADO
+  PROBLEMA_DIRECCION
 }
 
 enum MetodoPago {
@@ -462,8 +483,10 @@ model GeocodingCache {
   hitCount Int @default(1)
   createdAt DateTime @default(now())
   lastUsedAt DateTime @updatedAt
+  expiresAt DateTime?
 
   @@index([normalizedKey])
+  @@index([expiresAt])
 }
 
 model ShippingRadiusTier {

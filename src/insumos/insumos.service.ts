@@ -76,7 +76,7 @@ export class InsumosService {
     });
   }
 
-  async sumarStock(id: string, cantidad: number) {
+  async sumarStock(id: string, cantidad: number, motivo?: string, userId?: string) {
     await this.ensureExists(id);
 
     const cant = Number(cantidad);
@@ -84,11 +84,33 @@ export class InsumosService {
       throw new BadRequestException('Cantidad inválida');
     }
 
-    return this.prisma.insumo.update({
+    const insumo = await this.prisma.insumo.findUnique({
+      where: { id },
+      select: { id: true, stockActual: true },
+    });
+
+    if (!insumo) throw new NotFoundException('Insumo no encontrado');
+
+    const stockAntes = Number(insumo.stockActual);
+    const stockDespues = stockAntes + cant;
+
+    const result = await this.prisma.insumo.update({
       where: { id },
       data: { stockActual: { increment: cant } },
       include: { proveedor: true },
     });
+
+    await this.registrarMovimiento({
+      insumoId: id,
+      tipo: 'AJUSTE_MANUAL',
+      cantidad: cant,
+      stockAntes,
+      stockDespues,
+      motivo: motivo || 'Ajuste manual de stock',
+      userId,
+    });
+
+    return result;
   }
 
   async setActivo(id: string, activo: boolean) {
@@ -125,13 +147,12 @@ export class InsumosService {
     if (!exists) throw new NotFoundException('Insumo no encontrado');
   }
 
-  async descontarStock(id: string, cantidad: number) {
+  async descontarStock(id: string, cantidad: number, pedidoId?: string, motivo?: string, userId?: string) {
     const cant = Number(cantidad);
     if (!Number.isFinite(cant) || cant <= 0) {
       throw new BadRequestException('Cantidad inválida');
     }
 
-    // 1) Traer insumo actual
     const insumo = await this.prisma.insumo.findUnique({
       where: { id },
       select: { id: true, stockActual: true },
@@ -139,7 +160,6 @@ export class InsumosService {
 
     if (!insumo) throw new NotFoundException('Insumo no encontrado');
 
-    // 2) Validar que no quede negativo
     const stockActual = Number(insumo.stockActual);
     if (stockActual - cant < 0) {
       throw new BadRequestException(
@@ -147,10 +167,87 @@ export class InsumosService {
       );
     }
 
-    // 3) Descontar
-    return this.prisma.insumo.update({
+    const result = await this.prisma.insumo.update({
       where: { id },
       data: { stockActual: { decrement: cant } },
     });
+
+    await this.registrarMovimiento({
+      insumoId: id,
+      tipo: pedidoId ? 'DESCUENTO_PEDIDO' : 'AJUSTE_MANUAL',
+      cantidad: -cant,
+      stockAntes: stockActual,
+      stockDespues: stockActual - cant,
+      pedidoId,
+      motivo: motivo || (pedidoId ? 'Consumo por pedido' : 'Ajuste manual de stock'),
+      userId,
+    });
+
+    return result;
+  }
+
+  async registrarMovimiento(data: {
+    insumoId: string;
+    tipo: string;
+    cantidad: number;
+    stockAntes: number;
+    stockDespues: number;
+    pedidoId?: string;
+    motivo?: string;
+    userId?: string;
+  }) {
+    return this.prisma.stockMovimiento.create({ data });
+  }
+
+  async obtenerMovimientos(insumoId: string, limit = 50) {
+    return this.prisma.stockMovimiento.findMany({
+      where: { insumoId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  async obtenerMovimientosRecientes(limit = 20) {
+    return this.prisma.stockMovimiento.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: { insumo: { select: { nombre: true } } },
+    });
+  }
+
+  async reporteConsumo(desde: string, hasta: string) {
+    const start = new Date(desde);
+    const end = new Date(hasta);
+    end.setHours(23, 59, 59, 999);
+
+    const movimientos = await this.prisma.stockMovimiento.findMany({
+      where: {
+        tipo: 'DESCUENTO_PEDIDO',
+        createdAt: { gte: start, lte: end },
+      },
+      include: { insumo: { select: { nombre: true, unidadMedida: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const agrupado = new Map<string, { insumoId: string; nombre: string; unidadMedida: string; totalConsumido: number; cantidadMovimientos: number }>();
+
+    for (const m of movimientos) {
+      const key = m.insumoId;
+      const existente = agrupado.get(key);
+      if (existente) {
+        existente.totalConsumido += Math.abs(m.cantidad);
+        existente.cantidadMovimientos += 1;
+      } else {
+        agrupado.set(key, {
+          insumoId: m.insumoId,
+          nombre: m.insumo.nombre,
+          unidadMedida: m.insumo.unidadMedida,
+          totalConsumido: Math.abs(m.cantidad),
+          cantidadMovimientos: 1,
+        });
+      }
+    }
+
+    return Array.from(agrupado.values()).sort((a, b) => b.totalConsumido - a.totalConsumido);
   }
 }

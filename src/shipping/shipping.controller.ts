@@ -259,4 +259,36 @@ export class ShippingController {
     console.log(`[SHIPPING] Entrada de caché eliminada (admin): ${id}`);
     return this.geocodingService.deleteCacheEntry(id);
   }
+
+  @Get('geocoding-cache/stats')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Estadísticas del caché de geocoding' })
+  getGeocodingCacheStats() {
+    return this.geocodingService.getCacheStats();
+  }
+
+  @Post('geocoding-cache/clear-expired')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Limpiar entradas expiradas del caché' })
+  clearExpiredCache() {
+    return this.geocodingService.clearExpiredCache();
+  }
+
+  @Post('geocoding-cache/clear-all')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Limpiar todo el caché de geocoding' })
+  clearAllCache() {
+    return this.geocodingService.clearAllCache();
+  }
+
+  @Post('geocoding-cache/clear-by-precision')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Limpiar caché por precisión' })
+  clearCacheByPrecision(@Body() body: { precision: string }) {
+    return this.geocodingService.clearCacheByPrecision(body.precision);
+  }
 }

@@ -486,6 +486,8 @@ export class PedidosService {
         },
       };
 
+      let pedidoResult: any;
+
       if (pedidoId) {
         const pedido = await tx.pedido.findUnique({
           where: { id: pedidoId },
@@ -503,7 +505,7 @@ export class PedidosService {
         if (!ESTADOS_ABIERTOS.includes(pedido.estado))
           throw new BadRequestException('Pedido cerrado');
 
-        const pedidoActualizado = await tx.pedido.update({
+        pedidoResult = await tx.pedido.update({
           where: { id: pedidoId },
           data: {
             total: { increment: totalConOfertas },
@@ -529,72 +531,178 @@ export class PedidosService {
             ...(referencias !== undefined ? { referencias } : {}),
             ...(notasRepartidor !== undefined ? { notasRepartidor } : {}),
             ...(shippingZoneName !== undefined ? { shippingZoneName } : {}),
-  ...(shippingReason !== undefined ? { shippingReason } : {}),
-  ...(direccionPrecision !== undefined ? { direccionPrecision } : {}),
-},
+            ...(shippingReason !== undefined ? { shippingReason } : {}),
+            ...(direccionPrecision !== undefined ? { direccionPrecision } : {}),
+          },
           include: includeConfig,
         });
-
-        await this.registrarOfertasAplicadas(
-          tx,
-          pedidoActualizado.id,
-          calculoOfertas,
-        );
-
-        if (origen === 'MENU') {
-          this.pedidosGateway.notificarNuevoPedido({
-            id: pedidoActualizado.id,
-            nombreCliente: pedidoActualizado.nombreCliente || nombreClienteLimpio || '',
-            apellidoCliente: pedidoActualizado.apellidoCliente || apellidoClienteLimpio || '',
-            numeroCliente: pedidoActualizado.numeroCliente || numeroClienteLimpio || '',
+      } else {
+        pedidoResult = await tx.pedido.create({
+          data: {
             tipo,
-            total: pedidoActualizado.total,
-          });
-        }
-
-        return pedidoActualizado;
+            nombreCliente: nombreClienteLimpio!,
+            apellidoCliente: apellidoClienteLimpio,
+            metodoPago: (metodoPago as MetodoPago) ?? null,
+            numeroCliente: numeroClienteLimpio,
+            direccion: tipo === TipoPedidoDto.DELIVERY ? direccion!.trim() : null,
+            costoEnvio: costoEnvio ?? 0,
+            direccionLat: direccionLat ?? null,
+            direccionLng: direccionLng ?? null,
+            direccionFormateada: direccionFormateada ?? null,
+            piso: piso ?? null,
+            departamento: departamento ?? null,
+            referencias: referencias ?? null,
+            notasRepartidor: notasRepartidor ?? null,
+            shippingZoneName: shippingZoneName ?? null,
+            shippingReason: shippingReason ?? null,
+            direccionPrecision: direccionPrecision ?? null,
+            total: totalConOfertas,
+            estado: EstadoPedido.PENDIENTE,
+            detalles: { create: detallesCreate },
+          },
+          include: includeConfig,
+        });
       }
 
-    const pedidoNuevo = await tx.pedido.create({
-      data: {
-        tipo,
-        nombreCliente: nombreClienteLimpio!,
-        apellidoCliente: apellidoClienteLimpio,
-        metodoPago: (metodoPago as MetodoPago) ?? null,
-        numeroCliente: numeroClienteLimpio,
-        direccion: tipo === TipoPedidoDto.DELIVERY ? direccion!.trim() : null,
-        costoEnvio: costoEnvio ?? 0,
-        direccionLat: direccionLat ?? null,
-        direccionLng: direccionLng ?? null,
-        direccionFormateada: direccionFormateada ?? null,
-        piso: piso ?? null,
-        departamento: departamento ?? null,
-        referencias: referencias ?? null,
-        notasRepartidor: notasRepartidor ?? null,
-  shippingZoneName: shippingZoneName ?? null,
-  shippingReason: shippingReason ?? null,
-  direccionPrecision: direccionPrecision ?? null,
-  total: totalConOfertas,
-        estado: EstadoPedido.PENDIENTE,
-        detalles: { create: detallesCreate },
-      },
-      include: includeConfig,
-    });
+      // ✅ Descontar stock de extras con registro de movimientos
+      for (const e of todosLosExtras) {
+        const extra = await tx.extra.findUnique({
+          where: { id: e.extraId },
+          select: { id: true, insumoId: true, stockActual: true, nombre: true },
+        });
 
-      await this.registrarOfertasAplicadas(tx, pedidoNuevo.id, calculoOfertas);
+        if (!extra) {
+          throw new BadRequestException(`Extra no encontrado: ${e.extraId}`);
+        }
+
+        if (extra.insumoId) {
+          const insumo = await tx.insumo.findUnique({
+            where: { id: extra.insumoId },
+            select: { stockActual: true, nombre: true },
+          });
+          const stockAntes = Number(insumo?.stockActual ?? 0);
+
+          const result = await tx.insumo.updateMany({
+            where: {
+              id: extra.insumoId,
+              stockActual: { gte: e.cantidad },
+            },
+            data: {
+              stockActual: { decrement: e.cantidad },
+            },
+          });
+
+          if (result.count === 0) {
+            throw new BadRequestException(
+              `Stock insuficiente para extra ${extra.nombre} (insumo: ${insumo?.nombre || extra.insumoId}). ` +
+                `Disponible: ${stockAntes}, Solicitado: ${e.cantidad}`,
+            );
+          }
+
+          await tx.stockMovimiento.create({
+            data: {
+              insumoId: extra.insumoId,
+              tipo: 'DESCUENTO_PEDIDO',
+              cantidad: -e.cantidad,
+              stockAntes,
+              stockDespues: stockAntes - e.cantidad,
+              pedidoId: pedidoResult.id,
+              motivo: `Consumo por extra: ${extra.nombre}`,
+            },
+          });
+        } else {
+          const result = await tx.extra.updateMany({
+            where: {
+              id: e.extraId,
+              stockActual: { gte: e.cantidad },
+            },
+            data: {
+              stockActual: { decrement: e.cantidad },
+            },
+          });
+
+          if (result.count === 0) {
+            throw new BadRequestException(
+              `Stock insuficiente para extra ${extra.nombre}. ` +
+                `Disponible: ${extra.stockActual ?? 0}, Solicitado: ${e.cantidad}`,
+            );
+          }
+        }
+      }
+
+      // ✅ Descontar stock de aderezos
+      for (const item of todosLosAderezosDescontar) {
+        const result = await tx.aderezo.updateMany({
+          where: {
+            id: item.aderezoId,
+            stockActual: { gte: item.cantidad },
+          },
+          data: {
+            stockActual: { decrement: item.cantidad },
+          },
+        });
+
+        if (result.count === 0) {
+          const ade = aderezoMap.get(item.aderezoId);
+          throw new BadRequestException(
+            `Stock insuficiente de aderezo ${ade?.nombre || item.aderezoId}. ` +
+              `Disponible: ${ade?.stockActual ?? 0}, Necesario: ${item.cantidad}`,
+          );
+        }
+      }
+
+      // ✅ Descontar stock de recetas con registro de movimientos
+      for (const [insumoId, requerido] of stockRequeridoPorInsumo) {
+        const insumo = await tx.insumo.findUnique({
+          where: { id: insumoId },
+          select: { stockActual: true, nombre: true },
+        });
+        const stockAntes = Number(insumo?.stockActual ?? 0);
+
+        const result = await tx.insumo.updateMany({
+          where: {
+            id: insumoId,
+            stockActual: { gte: requerido },
+          },
+          data: {
+            stockActual: { decrement: requerido },
+          },
+        });
+
+        if (result.count === 0) {
+          throw new BadRequestException(
+            `Stock insuficiente de ${insumo?.nombre || insumoId}. ` +
+              `Disponible: ${stockAntes}, Requerido: ${requerido}`,
+          );
+        }
+
+        await tx.stockMovimiento.create({
+          data: {
+            insumoId,
+            tipo: 'DESCUENTO_PEDIDO',
+            cantidad: -requerido,
+            stockAntes,
+            stockDespues: stockAntes - requerido,
+            pedidoId: pedidoResult.id,
+            motivo: 'Consumo por pedido',
+          },
+        });
+      }
+
+      await this.registrarOfertasAplicadas(tx, pedidoResult.id, calculoOfertas);
 
       if (origen === 'MENU') {
         this.pedidosGateway.notificarNuevoPedido({
-          id: pedidoNuevo.id,
-          nombreCliente: pedidoNuevo.nombreCliente || nombreClienteLimpio || '',
-          apellidoCliente: pedidoNuevo.apellidoCliente || apellidoClienteLimpio || '',
-          numeroCliente: pedidoNuevo.numeroCliente || numeroClienteLimpio || '',
+          id: pedidoResult.id,
+          nombreCliente: pedidoResult.nombreCliente || nombreClienteLimpio || '',
+          apellidoCliente: pedidoResult.apellidoCliente || apellidoClienteLimpio || '',
+          numeroCliente: pedidoResult.numeroCliente || numeroClienteLimpio || '',
           tipo,
-          total: pedidoNuevo.total,
+          total: pedidoResult.total,
         });
       }
 
-      return pedidoNuevo;
+      return pedidoResult;
     });
   }
 

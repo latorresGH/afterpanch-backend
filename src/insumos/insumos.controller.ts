@@ -71,7 +71,7 @@ export class InsumosController {
     description: 'Incrementa el stock del insumo.',
   })
   sumarStock(@Param('id') id: string, @Body() dto: SumarStockDto) {
-    return this.insumosService.sumarStock(id, dto.cantidad);
+    return this.insumosService.sumarStock(id, dto.cantidad, dto.motivo);
   }
 
   @Patch(':id/restar')
@@ -81,7 +81,21 @@ export class InsumosController {
     description: 'Decrementa stock validando que no quede negativo.',
   })
   descontarStock(@Param('id') id: string, @Body() dto: DescontarStockDto) {
-    return this.insumosService.descontarStock(id, dto.cantidad);
+    return this.insumosService.descontarStock(id, dto.cantidad, undefined, dto.motivo);
+  }
+
+  @Get(':id/movimientos')
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({ summary: 'Historial de movimientos de stock' })
+  obtenerMovimientos(@Param('id') id: string, @Query('limit') limit?: string) {
+    return this.insumosService.obtenerMovimientos(id, limit ? parseInt(limit) : 50);
+  }
+
+  @Get('movimientos/recientes')
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({ summary: 'Movimientos recientes de stock' })
+  obtenerMovimientosRecientes(@Query('limit') limit?: string) {
+    return this.insumosService.obtenerMovimientosRecientes(limit ? parseInt(limit) : 20);
   }
 
   @Patch(':id/activo')
@@ -113,5 +127,15 @@ export class InsumosController {
   })
   borrar(@Param('id') id: string) {
     return this.insumosService.borrar(id);
+  }
+
+  @Get('reporte/consumo')
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({ summary: 'Reporte de consumo de stock por período' })
+  reporteConsumo(
+    @Query('desde') desde: string,
+    @Query('hasta') hasta: string,
+  ) {
+    return this.insumosService.reporteConsumo(desde, hasta);
   }
 }

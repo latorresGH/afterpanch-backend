@@ -19,9 +19,15 @@ export class AuthService {
     return (email || '').trim().toLowerCase();
   }
 
+  private isValidEmail(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
   async register(email: string, password: string, nombre: string, role?: Role) {
     const normalized = this.normalizeEmail(email);
-    if (!normalized) throw new BadRequestException('Email inválido');
+    if (!normalized || !this.isValidEmail(normalized))
+      throw new BadRequestException('Email inválido');
     if (!password || password.length < 6)
       throw new BadRequestException('Password mínimo 6 caracteres');
     if (!nombre || !nombre.trim())
@@ -45,7 +51,8 @@ export class AuthService {
       email: user.email,
       nombre: user.nombre,
     };
-    const access_token = await this.jwt.signAsync(payload);
+    const expiresIn = (process.env.JWT_EXPIRES || '10h') as `${number}h` | `${number}d` | `${number}s` | `${number}m`;
+    const access_token = await this.jwt.signAsync(payload, { expiresIn });
 
     return {
       access_token,
@@ -82,7 +89,9 @@ export class AuthService {
     };
 
     return {
-      access_token: await this.jwt.signAsync(payload),
+      access_token: await this.jwt.signAsync(payload, {
+        expiresIn: (process.env.JWT_EXPIRES || '10h') as `${number}h` | `${number}d` | `${number}s` | `${number}m`,
+      }),
       user: {
         id: user.id,
         email: user.email,

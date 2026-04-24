@@ -20,6 +20,11 @@ export class UpdateInsumoDto {
   @IsString()
   unidadMedida?: string;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  stockActual?: number;
+
   // ✅ asignar / sacar proveedor
   @IsOptional()
   @IsString()

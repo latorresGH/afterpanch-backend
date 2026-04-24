@@ -38,6 +38,10 @@ export class CreateExtraDto {
   insumoId?: string | null;
 
   @IsOptional()
+  @IsBoolean()
+  esGlobal?: boolean;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   categoriaIds?: string[];

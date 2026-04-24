@@ -18,6 +18,7 @@ import {
 import { AderezosService } from './aderezos.service';
 import { CreateAderezoDto } from './dto/create-aderezo.dto';
 import { SetPrecioCategoriaDto } from './dto/set-precio-categoria.dto';
+import { SetConsumoCategoriaDto } from './dto/set-consumo-categoria.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
@@ -49,6 +50,27 @@ export class AderezosController {
   })
   setPrecioCategoria(@Body() dto: SetPrecioCategoriaDto) {
     return this.aderezosService.setPrecioCategoria(dto);
+  }
+
+  @Post('consumo-categoria')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Asignar consumo de aderezo por categoría',
+    description:
+      'Define cuánto se consume de un aderezo para una categoría específica. Ej: Mayonesa 40g en hamburguesas, 30g en panchos.',
+  })
+  setConsumoCategoria(@Body() dto: SetConsumoCategoriaDto) {
+    return this.aderezosService.setConsumoCategoria(dto);
+  }
+
+  @Get(':id/consumo/:categoriaId')
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({ summary: 'Obtener consumo de aderezo por categoría' })
+  getConsumoPorCategoria(
+    @Param('id') aderezoId: string,
+    @Param('categoriaId') categoriaId: string,
+  ) {
+    return this.aderezosService.getConsumoPorCategoria(aderezoId, categoriaId);
   }
 
   @Get()
@@ -90,7 +112,7 @@ export class AderezosController {
   @ApiOperation({ summary: 'Actualizar aderezo' })
   update(
     @Param('id') id: string,
-    @Body() dto: { nombre?: string; stockActual?: number; activo?: boolean; categoriaIds?: string[] },
+    @Body() dto: { nombre?: string; stockActual?: number; activo?: boolean; unidadMedida?: string; esGlobal?: boolean; categoriaIds?: string[] },
   ) {
     return this.aderezosService.update(id, dto);
   }

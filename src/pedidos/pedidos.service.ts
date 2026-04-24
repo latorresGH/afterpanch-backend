@@ -149,7 +149,9 @@ export class PedidosService {
               stockActual: true,
               activo: true,
               insumoId: true,
+              unidadMedida: true,
               preciosPorCategoria: true,
+              consumosPorCategoria: true,
             },
           })
         : [];
@@ -161,6 +163,7 @@ export class PedidosService {
             ...e,
             precio: Number(e.precio),
             preciosPorCategoria: e.preciosPorCategoria,
+            consumosPorCategoria: e.consumosPorCategoria,
           },
         ]),
       );
@@ -178,6 +181,8 @@ export class PedidosService {
                 nombre: true,
                 stockActual: true,
                 activo: true,
+                unidadMedida: true,
+                consumosPorCategoria: true,
               },
             })
           : [];
@@ -185,7 +190,11 @@ export class PedidosService {
       const aderezoMap = new Map(
         aderezosDb.map((a) => [
           a.id,
-          { ...a, stockActual: Number(a.stockActual) },
+          {
+            ...a,
+            stockActual: Number(a.stockActual),
+            consumosPorCategoria: a.consumosPorCategoria,
+          },
         ]),
       );
 
@@ -286,10 +295,12 @@ export class PedidosService {
       let totalNuevosItems = 0;
       const detallesCreate: Prisma.PedidoDetalleCreateWithoutPedidoInput[] = [];
 
-      const todosLosExtras: { extraId: string; cantidad: number }[] = [];
+      // Track extras and aderezos with their consumption amounts per category
+      const todosLosExtras: { extraId: string; cantidad: number; categoriaId: string | null }[] = [];
       const todosLosAderezosDescontar: {
         aderezoId: string;
         cantidad: number;
+        categoriaId: string | null;
       }[] = [];
 
       for (const d of detalles as any[]) {
@@ -306,7 +317,9 @@ export class PedidosService {
           cantidad: e.cantidad ?? 1,
         }));
 
-        todosLosExtras.push(...extrasNorm);
+        extrasNorm.forEach((e) => {
+          todosLosExtras.push({ ...e, categoriaId });
+        });
 
         let extrasCobradoTotal = 0;
         const extrasJsonArr: any[] = [];
@@ -346,7 +359,7 @@ export class PedidosService {
           : [];
 
         for (const adeId of aderezosIds) {
-          todosLosAderezosDescontar.push({ aderezoId: adeId, cantidad });
+          todosLosAderezosDescontar.push({ aderezoId: adeId, cantidad, categoriaId });
         }
 
         detallesCreate.push({
@@ -364,100 +377,8 @@ export class PedidosService {
         });
       }
 
-      for (const e of todosLosExtras) {
-        const extra = await tx.extra.findUnique({
-          where: { id: e.extraId },
-          select: { id: true, insumoId: true, stockActual: true, nombre: true },
-        });
-
-        if (!extra) {
-          throw new BadRequestException(`Extra no encontrado: ${e.extraId}`);
-        }
-
-        if (extra.insumoId) {
-          const result = await tx.insumo.updateMany({
-            where: {
-              id: extra.insumoId,
-              stockActual: { gte: e.cantidad },
-            },
-            data: {
-              stockActual: { decrement: e.cantidad },
-            },
-          });
-
-          if (result.count === 0) {
-            const insumo = await tx.insumo.findUnique({
-              where: { id: extra.insumoId },
-              select: { stockActual: true, nombre: true },
-            });
-            throw new BadRequestException(
-              `Stock insuficiente para extra ${extra.nombre} (insumo: ${insumo?.nombre || extra.insumoId}). ` +
-                `Disponible: ${insumo?.stockActual ?? 0}, Solicitado: ${e.cantidad}`,
-            );
-          }
-        } else {
-          const result = await tx.extra.updateMany({
-            where: {
-              id: e.extraId,
-              stockActual: { gte: e.cantidad },
-            },
-            data: {
-              stockActual: { decrement: e.cantidad },
-            },
-          });
-
-          if (result.count === 0) {
-            throw new BadRequestException(
-              `Stock insuficiente para extra ${extra.nombre}. ` +
-                `Disponible: ${extra.stockActual ?? 0}, Solicitado: ${e.cantidad}`,
-            );
-          }
-        }
-      }
-
-      for (const item of todosLosAderezosDescontar) {
-        const result = await tx.aderezo.updateMany({
-          where: {
-            id: item.aderezoId,
-            stockActual: { gte: item.cantidad },
-          },
-          data: {
-            stockActual: { decrement: item.cantidad },
-          },
-        });
-
-        if (result.count === 0) {
-          const ade = aderezoMap.get(item.aderezoId);
-          throw new BadRequestException(
-            `Stock insuficiente de aderezo ${ade?.nombre || item.aderezoId}. ` +
-              `Disponible: ${ade?.stockActual ?? 0}, Necesario: ${item.cantidad}`,
-          );
-        }
-      }
-
-      for (const [insumoId, requerido] of stockRequeridoPorInsumo) {
-        const result = await tx.insumo.updateMany({
-          where: {
-            id: insumoId,
-            stockActual: { gte: requerido },
-          },
-          data: {
-            stockActual: { decrement: requerido },
-          },
-        });
-
-        if (result.count === 0) {
-          const insumo = await tx.insumo.findUnique({
-            where: { id: insumoId },
-            select: { stockActual: true, nombre: true },
-          });
-          throw new BadRequestException(
-            `Stock insuficiente de ${insumo?.nombre || insumoId}. ` +
-              `Disponible: ${insumo?.stockActual ?? 0}, Requerido: ${requerido}`,
-          );
-        }
-      }
-
+      // El descuento de stock se realiza una sola vez despues de crear el pedido
+      // (ver bloque de auditoria con stockMovimiento mas abajo)
       const lineasParaCalcular = detalles.map((d: any) => ({
         productoId: d.productoId,
         cantidad: d.cantidad,
@@ -568,12 +489,17 @@ export class PedidosService {
       for (const e of todosLosExtras) {
         const extra = await tx.extra.findUnique({
           where: { id: e.extraId },
-          select: { id: true, insumoId: true, stockActual: true, nombre: true },
+          select: { id: true, insumoId: true, stockActual: true, nombre: true, unidadMedida: true },
         });
 
         if (!extra) {
           throw new BadRequestException(`Extra no encontrado: ${e.extraId}`);
         }
+
+        // Calcular consumo según categoría del producto
+        const extraData = extraMap.get(e.extraId);
+        const cantidadConsumo = this.getExtraConsumo(extraData, e.categoriaId);
+        const cantidadTotalDescontar = cantidadConsumo * e.cantidad;
 
         if (extra.insumoId) {
           const insumo = await tx.insumo.findUnique({
@@ -585,17 +511,17 @@ export class PedidosService {
           const result = await tx.insumo.updateMany({
             where: {
               id: extra.insumoId,
-              stockActual: { gte: e.cantidad },
+              stockActual: { gte: cantidadTotalDescontar },
             },
             data: {
-              stockActual: { decrement: e.cantidad },
+              stockActual: { decrement: cantidadTotalDescontar },
             },
           });
 
           if (result.count === 0) {
             throw new BadRequestException(
               `Stock insuficiente para extra ${extra.nombre} (insumo: ${insumo?.nombre || extra.insumoId}). ` +
-                `Disponible: ${stockAntes}, Solicitado: ${e.cantidad}`,
+                `Disponible: ${stockAntes}, Solicitado: ${cantidadTotalDescontar}`,
             );
           }
 
@@ -603,52 +529,70 @@ export class PedidosService {
             data: {
               insumoId: extra.insumoId,
               tipo: 'DESCUENTO_PEDIDO',
-              cantidad: -e.cantidad,
+              cantidad: -cantidadTotalDescontar,
               stockAntes,
-              stockDespues: stockAntes - e.cantidad,
+              stockDespues: stockAntes - cantidadTotalDescontar,
               pedidoId: pedidoResult.id,
-              motivo: `Consumo por extra: ${extra.nombre}`,
+              motivo: `Consumo por extra: ${extra.nombre} (${cantidadConsumo}${extra.unidadMedida || 'un'} x ${e.cantidad})`,
             },
           });
         } else {
+          const stockAntes = Number(extra.stockActual ?? 0);
+
           const result = await tx.extra.updateMany({
             where: {
               id: e.extraId,
-              stockActual: { gte: e.cantidad },
+              stockActual: { gte: cantidadTotalDescontar },
             },
             data: {
-              stockActual: { decrement: e.cantidad },
+              stockActual: { decrement: cantidadTotalDescontar },
             },
           });
 
           if (result.count === 0) {
             throw new BadRequestException(
               `Stock insuficiente para extra ${extra.nombre}. ` +
-                `Disponible: ${extra.stockActual ?? 0}, Solicitado: ${e.cantidad}`,
+                `Disponible: ${stockAntes}, Solicitado: ${cantidadTotalDescontar}`,
             );
           }
+
+          // Registrar movimiento para extras sin insumo asociado
+          // Nota: No usamos stockMovimiento porque no hay un insumo relacionado
+          // pero podríamos crear un log o usar una tabla específica para extras
+          console.log(`[STOCK] Extra ${extra.nombre} descontado: ${cantidadTotalDescontar} ${extra.unidadMedida || 'un'}`);
         }
       }
 
-      // ✅ Descontar stock de aderezos
+      // ✅ Descontar stock de aderezos con consumo configurable
       for (const item of todosLosAderezosDescontar) {
+        const aderezoData = aderezoMap.get(item.aderezoId);
+        const cantidadConsumo = this.getAderezoConsumo(aderezoData, item.categoriaId);
+        const cantidadTotalDescontar = cantidadConsumo * item.cantidad;
+
+        const aderezo = await tx.aderezo.findUnique({
+          where: { id: item.aderezoId },
+          select: { nombre: true, stockActual: true, unidadMedida: true },
+        });
+        const stockAntes = Number(aderezo?.stockActual ?? 0);
+
         const result = await tx.aderezo.updateMany({
           where: {
             id: item.aderezoId,
-            stockActual: { gte: item.cantidad },
+            stockActual: { gte: cantidadTotalDescontar },
           },
           data: {
-            stockActual: { decrement: item.cantidad },
+            stockActual: { decrement: cantidadTotalDescontar },
           },
         });
 
         if (result.count === 0) {
-          const ade = aderezoMap.get(item.aderezoId);
           throw new BadRequestException(
-            `Stock insuficiente de aderezo ${ade?.nombre || item.aderezoId}. ` +
-              `Disponible: ${ade?.stockActual ?? 0}, Necesario: ${item.cantidad}`,
+            `Stock insuficiente de aderezo ${aderezo?.nombre || item.aderezoId}. ` +
+              `Disponible: ${stockAntes}, Necesario: ${cantidadTotalDescontar}`,
           );
         }
+
+        console.log(`[STOCK] Aderezo ${aderezo?.nombre} descontado: ${cantidadTotalDescontar} ${aderezo?.unidadMedida || 'un'}`);
       }
 
       // ✅ Descontar stock de recetas con registro de movimientos
@@ -722,6 +666,44 @@ export class PedidosService {
     }
 
     return Number(extra.precio);
+  }
+
+  private getExtraConsumo(
+    extra: any,
+    categoriaId: string | null | undefined,
+  ): number {
+    if (!extra) return 1;
+
+    if (extra.consumosPorCategoria && categoriaId) {
+      const consumoEspecifico = extra.consumosPorCategoria.find(
+        (c: any) => c.categoriaId === categoriaId,
+      );
+      if (consumoEspecifico) {
+        return Number(consumoEspecifico.cantidadConsumo);
+      }
+    }
+
+    console.warn(`[STOCK] Extra ${extra.nombre} no tiene configuración de consumo para categoría ${categoriaId}. Usando default=1`);
+    return 1;
+  }
+
+  private getAderezoConsumo(
+    aderezo: any,
+    categoriaId: string | null | undefined,
+  ): number {
+    if (!aderezo) return 1;
+
+    if (aderezo.consumosPorCategoria && categoriaId) {
+      const consumoEspecifico = aderezo.consumosPorCategoria.find(
+        (c: any) => c.categoriaId === categoriaId,
+      );
+      if (consumoEspecifico) {
+        return Number(consumoEspecifico.cantidadConsumo);
+      }
+    }
+
+    console.warn(`[STOCK] Aderezo ${aderezo.nombre} no tiene configuración de consumo para categoría ${categoriaId}. Usando default=1`);
+    return 1;
   }
 
   private async registrarOfertasAplicadas(

@@ -7,6 +7,14 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateExtraDto } from './dto/create-extra.dto';
 import { UpdateExtraDto } from './dto/update-extra.dto';
 import { SetExtraPrecioCategoriaDto } from './dto/set-precio-categoria.dto';
+import { SetExtraConsumoCategoriaDto } from './dto/set-consumo-categoria.dto';
+
+const EXTRA_INCLUDE = {
+  insumo: true,
+  preciosPorCategoria: { include: { categoria: true } },
+  categoriasAplica: { include: { categoria: true } },
+  consumosPorCategoria: { include: { categoria: true } },
+} as const;
 
 @Injectable()
 export class ExtrasService {
@@ -43,15 +51,12 @@ export class ExtrasService {
         stockActual:
           dto.stockActual !== undefined ? Number(dto.stockActual) : 0,
         activo: dto.activo !== undefined ? Boolean(dto.activo) : true,
+        esGlobal: dto.esGlobal ?? false,
         categoria: this.normCategoria(dto.categoria),
         unidadMedida: dto.unidadMedida || 'un',
         insumoId: dto.insumoId || null,
       },
-      include: {
-        insumo: true,
-        preciosPorCategoria: { include: { categoria: true } },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: EXTRA_INCLUDE,
     });
 
     if (dto.categoriaIds && dto.categoriaIds.length > 0) {
@@ -84,11 +89,7 @@ export class ExtrasService {
         ...(soloDisponibles ? { stockActual: { gt: 0 } } : {}),
         ...(categoria ? { categoria } : {}),
       },
-      include: {
-        insumo: true,
-        preciosPorCategoria: { include: { categoria: true } },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: EXTRA_INCLUDE,
       orderBy: [{ categoria: 'asc' }, { nombre: 'asc' }],
     });
   }
@@ -99,7 +100,7 @@ export class ExtrasService {
         activo: true,
         stockActual: { gt: 0 },
         OR: [
-          { categoriasAplica: { none: {} } },
+          { esGlobal: true },
           {
             categoriasAplica: {
               some: { categoriaId: categoriaProductoId },
@@ -107,11 +108,7 @@ export class ExtrasService {
           },
         ],
       },
-      include: {
-        insumo: true,
-        preciosPorCategoria: { include: { categoria: true } },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: EXTRA_INCLUDE,
       orderBy: { nombre: 'asc' },
     });
   }
@@ -119,11 +116,7 @@ export class ExtrasService {
   async findOne(id: string) {
     const e = await this.prisma.extra.findUnique({
       where: { id },
-      include: {
-        insumo: true,
-        preciosPorCategoria: { include: { categoria: true } },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: EXTRA_INCLUDE,
     });
     if (!e) throw new NotFoundException('Extra no encontrado');
     return e;
@@ -178,6 +171,49 @@ export class ExtrasService {
     });
   }
 
+  async setConsumoCategoria(dto: SetExtraConsumoCategoriaDto) {
+    const extra = await this.prisma.extra.findUnique({
+      where: { id: dto.extraId },
+    });
+
+    if (!extra) throw new NotFoundException('Extra no encontrado');
+
+    const categoria = await this.prisma.categoria.findUnique({
+      where: { id: dto.categoriaId },
+    });
+
+    if (!categoria) throw new NotFoundException('Categoría no encontrada');
+
+    return this.prisma.extraConsumo.upsert({
+      where: {
+        extraId_categoriaId: {
+          extraId: dto.extraId,
+          categoriaId: dto.categoriaId,
+        },
+      },
+      update: { cantidadConsumo: dto.cantidadConsumo },
+      create: {
+        extraId: dto.extraId,
+        categoriaId: dto.categoriaId,
+        cantidadConsumo: dto.cantidadConsumo,
+      },
+      include: { extra: true, categoria: true },
+    });
+  }
+
+  async getConsumoPorCategoria(extraId: string, categoriaId: string): Promise<number> {
+    const consumo = await this.prisma.extraConsumo.findUnique({
+      where: {
+        extraId_categoriaId: {
+          extraId,
+          categoriaId,
+        },
+      },
+    });
+
+    return consumo?.cantidadConsumo ?? 0;
+  }
+
   async update(id: string, dto: UpdateExtraDto) {
     await this.ensureExists(id);
 
@@ -193,39 +229,38 @@ export class ExtrasService {
       }
     }
 
+    const { categoriaIds, ...rest } = dto;
+
     const data: any = {
-      ...dto,
+      ...rest,
       nombre:
-        dto.nombre !== undefined ? this.normNombre(dto.nombre) : undefined,
-      precio: dto.precio !== undefined ? Number(dto.precio) : undefined,
+        rest.nombre !== undefined ? this.normNombre(rest.nombre) : undefined,
+      precio: rest.precio !== undefined ? Number(rest.precio) : undefined,
       stockActual:
-        dto.stockActual !== undefined ? Number(dto.stockActual) : undefined,
+        rest.stockActual !== undefined ? Number(rest.stockActual) : undefined,
       categoria:
-        dto.categoria !== undefined
-          ? this.normCategoria(dto.categoria)
+        rest.categoria !== undefined
+          ? this.normCategoria(rest.categoria)
           : undefined,
-      unidadMedida: dto.unidadMedida,
-      insumoId: dto.insumoId !== undefined ? dto.insumoId : undefined,
+      unidadMedida: rest.unidadMedida,
+      esGlobal: rest.esGlobal !== undefined ? Boolean(rest.esGlobal) : undefined,
+      insumoId: rest.insumoId !== undefined ? rest.insumoId : undefined,
     };
 
     const extra = await this.prisma.extra.update({
       where: { id },
       data,
-      include: {
-        insumo: true,
-        preciosPorCategoria: { include: { categoria: true } },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: EXTRA_INCLUDE,
     });
 
-    if (dto.categoriaIds !== undefined) {
+    if (categoriaIds !== undefined) {
       await this.prisma.extraCategoria.deleteMany({
         where: { extraId: id },
       });
 
-      if (dto.categoriaIds.length > 0) {
+      if (categoriaIds.length > 0) {
         await this.prisma.extraCategoria.createMany({
-          data: dto.categoriaIds.map((catId) => ({
+          data: categoriaIds.map((catId) => ({
             extraId: id,
             categoriaId: catId,
           })),
@@ -243,10 +278,7 @@ export class ExtrasService {
     return this.prisma.extra.update({
       where: { id },
       data: { activo: Boolean(activo) },
-      include: {
-        insumo: true,
-        preciosPorCategoria: { include: { categoria: true } },
-      },
+      include: EXTRA_INCLUDE,
     });
   }
 
@@ -268,20 +300,14 @@ export class ExtrasService {
       });
       return this.prisma.extra.findUnique({
         where: { id },
-        include: {
-          insumo: true,
-          preciosPorCategoria: { include: { categoria: true } },
-        },
+        include: EXTRA_INCLUDE,
       });
     }
 
     return this.prisma.extra.update({
       where: { id },
       data: { stockActual: { increment: cant } },
-      include: {
-        insumo: true,
-        preciosPorCategoria: { include: { categoria: true } },
-      },
+      include: EXTRA_INCLUDE,
     });
   }
 
@@ -310,10 +336,7 @@ export class ExtrasService {
 
       return this.prisma.extra.findUnique({
         where: { id },
-        include: {
-          insumo: true,
-          preciosPorCategoria: { include: { categoria: true } },
-        },
+        include: EXTRA_INCLUDE,
       });
     }
 
@@ -328,16 +351,14 @@ export class ExtrasService {
 
     return this.prisma.extra.findUnique({
       where: { id },
-      include: {
-        insumo: true,
-        preciosPorCategoria: { include: { categoria: true } },
-      },
+      include: EXTRA_INCLUDE,
     });
   }
 
   async remove(id: string) {
     await this.ensureExists(id);
     await this.prisma.extraPrecio.deleteMany({ where: { extraId: id } });
+    await this.prisma.extraConsumo.deleteMany({ where: { extraId: id } });
     return this.prisma.extra.delete({ where: { id } });
   }
 

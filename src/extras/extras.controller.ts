@@ -19,6 +19,7 @@ import { ExtrasService } from './extras.service';
 import { CreateExtraDto } from './dto/create-extra.dto';
 import { UpdateExtraDto } from './dto/update-extra.dto';
 import { SetExtraPrecioCategoriaDto } from './dto/set-precio-categoria.dto';
+import { SetExtraConsumoCategoriaDto } from './dto/set-consumo-categoria.dto';
 import { ToggleActivoDto } from './dto/toggle-activo.dto';
 import { StockMovDto } from './dto/stock-mov.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -51,6 +52,27 @@ export class ExtrasController {
   })
   setPrecioCategoria(@Body() dto: SetExtraPrecioCategoriaDto) {
     return this.extras.setPrecioCategoria(dto);
+  }
+
+  @Post('consumo-categoria')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Asignar consumo de extra por categoría',
+    description:
+      'Define cuánto se consume de un extra para una categoría específica. Ej: Queso 50g en hamburguesas, 30g en panchos.',
+  })
+  setConsumoCategoria(@Body() dto: SetExtraConsumoCategoriaDto) {
+    return this.extras.setConsumoCategoria(dto);
+  }
+
+  @Get(':id/consumo/:categoriaId')
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({ summary: 'Obtener consumo de extra por categoría' })
+  getConsumoPorCategoria(
+    @Param('id') extraId: string,
+    @Param('categoriaId') categoriaId: string,
+  ) {
+    return this.extras.getConsumoPorCategoria(extraId, categoriaId);
   }
 
   @Get()

@@ -1,15 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigController } from './config.controller';
+import { NegocioConfigController } from './config.controller';
+import { NegocioConfigService } from './config.service';
+import { PrismaService } from '../prisma/prisma.service';
 
-describe('ConfigController', () => {
-  let controller: ConfigController;
+describe('NegocioConfigController', () => {
+  let controller: NegocioConfigController;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [ConfigController],
+      controllers: [NegocioConfigController],
+      providers: [
+        NegocioConfigService,
+        { provide: PrismaService, useValue: {} },
+      ],
     }).compile();
 
-    controller = module.get<ConfigController>(ConfigController);
+    controller = module.get<NegocioConfigController>(NegocioConfigController);
   });
 
   it('should be defined', () => {

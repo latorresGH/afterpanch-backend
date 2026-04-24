@@ -39,6 +39,10 @@ export class UpdateExtraDto {
   insumoId?: string | null;
 
   @IsOptional()
+  @IsBoolean()
+  esGlobal?: boolean;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   categoriaIds?: string[];

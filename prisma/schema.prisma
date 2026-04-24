@@ -95,6 +95,8 @@ model Categoria {
   preciosExtras    ExtraPrecio[]
   extrasCategoria  ExtraCategoria[]
   aderezosCategoria AderezoCategoria[]
+  consumosAderezo  AderezoConsumo[]
+  consumosExtra    ExtraConsumo[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -234,6 +236,7 @@ model Extra {
   unidadMedida     String   @default("un")
   stockActual      Float    @default(0)
   activo           Boolean  @default(true)
+  esGlobal         Boolean  @default(false)
   categoria        String   @default("ADEREZOS")
 
   insumoId         String?
@@ -241,6 +244,7 @@ model Extra {
 
   preciosPorCategoria ExtraPrecio[]
   categoriasAplica    ExtraCategoria[]
+  consumosPorCategoria ExtraConsumo[]
 
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -269,21 +273,48 @@ model ExtraPrecio {
   @@unique([extraId, categoriaId])
 }
 
+model ExtraConsumo {
+  id              String   @id @default(uuid())
+  extraId         String
+  categoriaId     String
+  cantidadConsumo Float    // ej: 30 (g, ml o unidades)
+
+  extra     Extra     @relation(fields: [extraId], references: [id], onDelete: Cascade)
+  categoria Categoria @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+
+  @@unique([extraId, categoriaId])
+}
+
 model Aderezo {
   id               String   @id @default(uuid())
   nombre           String   @unique
   stockActual      Float    @default(0)
+  unidadMedida     String?  // g, ml, unidad, etc.
   activo           Boolean  @default(true)
+  esGlobal         Boolean  @default(false)
 
-  precioPorCategoria  AderezoPrecio[]
-  categoriasAplica    AderezoCategoria[]
-  detalles            PedidoDetalle[]
+  precioPorCategoria   AderezoPrecio[]
+  categoriasAplica     AderezoCategoria[]
+  detalles             PedidoDetalle[]
+  consumosPorCategoria AderezoConsumo[]
 }
 
 model AderezoCategoria {
   id          String @id @default(uuid())
   aderezoId   String
   categoriaId String
+
+  aderezo   Aderezo   @relation(fields: [aderezoId], references: [id], onDelete: Cascade)
+  categoria Categoria @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+
+  @@unique([aderezoId, categoriaId])
+}
+
+model AderezoConsumo {
+  id              String   @id @default(uuid())
+  aderezoId       String
+  categoriaId     String
+  cantidadConsumo Float    // ej: 40 (g, ml o unidades)
 
   aderezo   Aderezo   @relation(fields: [aderezoId], references: [id], onDelete: Cascade)
   categoria Categoria @relation(fields: [categoriaId], references: [id], onDelete: Cascade)

@@ -4,6 +4,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 export enum ShippingModeDto {
   RADIUS = 'RADIUS',
   POLYGON = 'POLYGON',
+  RADIUS_TIERS = 'RADIUS_TIERS',
 }
 
 export class UpdateShippingConfigDto {

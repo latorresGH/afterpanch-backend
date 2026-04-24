@@ -6,6 +6,13 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAderezoDto } from './dto/create-aderezo.dto';
 import { SetPrecioCategoriaDto } from './dto/set-precio-categoria.dto';
+import { SetConsumoCategoriaDto } from './dto/set-consumo-categoria.dto';
+
+const ADEREZO_INCLUDE = {
+  precioPorCategoria: { include: { categoria: true } },
+  categoriasAplica: { include: { categoria: true } },
+  consumosPorCategoria: { include: { categoria: true } },
+} as const;
 
 @Injectable()
 export class AderezosService {
@@ -16,12 +23,11 @@ export class AderezosService {
       data: {
         nombre: createAderezoDto.nombre.trim(),
         stockActual: createAderezoDto.stockActual ?? 999,
+        unidadMedida: createAderezoDto.unidadMedida ?? null,
+        esGlobal: createAderezoDto.esGlobal ?? false,
         activo: true,
       },
-      include: {
-        precioPorCategoria: { include: { categoria: true } },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: ADEREZO_INCLUDE,
     });
 
     if (createAderezoDto.categoriaIds && createAderezoDto.categoriaIds.length > 0) {
@@ -48,12 +54,7 @@ export class AderezosService {
         ...(incluirInactivos ? {} : { activo: true }),
         ...(soloDisponibles ? { stockActual: { gt: 0 } } : {}),
       },
-      include: {
-        precioPorCategoria: {
-          include: { categoria: true },
-        },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: ADEREZO_INCLUDE,
       orderBy: { nombre: 'asc' },
     });
   }
@@ -64,7 +65,7 @@ export class AderezosService {
         activo: true,
         stockActual: { gt: 0 },
         OR: [
-          { categoriasAplica: { none: {} } },
+          { esGlobal: true },
           {
             categoriasAplica: {
               some: { categoriaId: categoriaProductoId },
@@ -72,10 +73,7 @@ export class AderezosService {
           },
         ],
       },
-      include: {
-        precioPorCategoria: { include: { categoria: true } },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: ADEREZO_INCLUDE,
       orderBy: { nombre: 'asc' },
     });
   }
@@ -83,12 +81,7 @@ export class AderezosService {
   async findOne(id: string) {
     const aderezo = await this.prisma.aderezo.findUnique({
       where: { id },
-      include: {
-        precioPorCategoria: {
-          include: { categoria: true },
-        },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: ADEREZO_INCLUDE,
     });
 
     if (!aderezo) throw new NotFoundException('Aderezo no encontrado');
@@ -138,9 +131,56 @@ export class AderezosService {
     return precio?.precio ?? 0;
   }
 
+  async setConsumoCategoria(dto: SetConsumoCategoriaDto) {
+    const aderezo = await this.prisma.aderezo.findUnique({
+      where: { id: dto.aderezoId },
+    });
+
+    if (!aderezo) throw new NotFoundException('Aderezo no encontrado');
+
+    const categoria = await this.prisma.categoria.findUnique({
+      where: { id: dto.categoriaId },
+    });
+
+    if (!categoria) throw new NotFoundException('Categoría no encontrada');
+
+    if (!aderezo.unidadMedida) {
+      console.warn(`[STOCK] Aderezo ${aderezo.nombre} no tiene unidadMedida definida. Se requiere para calcular consumo.`);
+    }
+
+    return this.prisma.aderezoConsumo.upsert({
+      where: {
+        aderezoId_categoriaId: {
+          aderezoId: dto.aderezoId,
+          categoriaId: dto.categoriaId,
+        },
+      },
+      update: { cantidadConsumo: dto.cantidadConsumo },
+      create: {
+        aderezoId: dto.aderezoId,
+        categoriaId: dto.categoriaId,
+        cantidadConsumo: dto.cantidadConsumo,
+      },
+      include: { aderezo: true, categoria: true },
+    });
+  }
+
+  async getConsumoPorCategoria(aderezoId: string, categoriaId: string): Promise<number> {
+    const consumo = await this.prisma.aderezoConsumo.findUnique({
+      where: {
+        aderezoId_categoriaId: {
+          aderezoId,
+          categoriaId,
+        },
+      },
+    });
+
+    return consumo?.cantidadConsumo ?? 0;
+  }
+
   async update(
     id: string,
-    dto: { nombre?: string; stockActual?: number; activo?: boolean; categoriaIds?: string[] },
+    dto: { nombre?: string; stockActual?: number; activo?: boolean; unidadMedida?: string; esGlobal?: boolean; categoriaIds?: string[] },
   ) {
     await this.findOne(id);
 
@@ -152,11 +192,10 @@ export class AderezosService {
           stockActual: Number(dto.stockActual),
         }),
         ...(dto.activo !== undefined && { activo: dto.activo }),
+        ...(dto.unidadMedida !== undefined && { unidadMedida: dto.unidadMedida || null }),
+        ...(dto.esGlobal !== undefined && { esGlobal: Boolean(dto.esGlobal) }),
       },
-      include: {
-        precioPorCategoria: { include: { categoria: true } },
-        categoriasAplica: { include: { categoria: true } },
-      },
+      include: ADEREZO_INCLUDE,
     });
 
     if (dto.categoriaIds !== undefined) {
@@ -184,7 +223,7 @@ export class AderezosService {
     return this.prisma.aderezo.update({
       where: { id },
       data: { activo: Boolean(activo) },
-      include: { precioPorCategoria: { include: { categoria: true } } },
+      include: ADEREZO_INCLUDE,
     });
   }
 
@@ -197,7 +236,7 @@ export class AderezosService {
     return this.prisma.aderezo.update({
       where: { id },
       data: { stockActual: { increment: cant } },
-      include: { precioPorCategoria: { include: { categoria: true } } },
+      include: ADEREZO_INCLUDE,
     });
   }
 
@@ -218,7 +257,7 @@ export class AderezosService {
 
     return this.prisma.aderezo.findUnique({
       where: { id },
-      include: { precioPorCategoria: { include: { categoria: true } } },
+      include: ADEREZO_INCLUDE,
     });
   }
 
@@ -226,6 +265,10 @@ export class AderezosService {
     await this.findOne(id);
 
     await this.prisma.aderezoPrecio.deleteMany({
+      where: { aderezoId: id },
+    });
+
+    await this.prisma.aderezoConsumo.deleteMany({
       where: { aderezoId: id },
     });
 

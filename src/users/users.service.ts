@@ -49,6 +49,7 @@ export class UsersService {
         email: true,
         nombre: true,
         role: true,
+        activo: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -76,12 +77,37 @@ export class UsersService {
     return this.prisma.user.findUnique({ where: { email: normalized } });
   }
 
+  async findByRole(role: Role) {
+    return this.prisma.user.findMany({
+      where: { role },
+      select: {
+        id: true,
+        email: true,
+        nombre: true,
+        role: true,
+        activo: true,
+        createdAt: true,
+      },
+      orderBy: { nombre: 'asc' },
+    });
+  }
+
+  async contarPedidosEnCamino(repartidorId: string) {
+    return this.prisma.pedido.count({
+      where: {
+        repartidorId,
+        estado: 'EN_CAMINO',
+      },
+    });
+  }
+
   async update(id: string, dto: UpdateUserDto) {
     await this.ensureExists(id);
 
     const data: any = {};
     if (dto.nombre !== undefined) data.nombre = dto.nombre.trim();
     if (dto.role !== undefined) data.role = dto.role;
+    if (dto.activo !== undefined) data.activo = Boolean(dto.activo);
 
     if (dto.password !== undefined) {
       data.password = await bcrypt.hash(dto.password, 10);
@@ -95,6 +121,7 @@ export class UsersService {
         email: true,
         nombre: true,
         role: true,
+        activo: true,
         createdAt: true,
       },
     });

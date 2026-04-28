@@ -15,12 +15,14 @@ import { AderezosModule } from './aderezos/aderezos.module';
 import { OfertasModule } from './ofertas/ofertas.module';
 import { CajaModule } from './caja/caja.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { NegocioConfigModule } from './config/config.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { HealthModule } from './health/health.module';
+import { BarriosModule } from './barrios/barrios.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 function validateEnv(config: Record<string, string>) {
   const required = ['DATABASE_URL', 'JWT_SECRET'];
@@ -65,10 +67,15 @@ function validateEnv(config: Record<string, string>) {
     NegocioConfigModule,
     ShippingModule,
     HealthModule,
+    BarriosModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

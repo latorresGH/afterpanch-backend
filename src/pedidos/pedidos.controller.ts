@@ -128,4 +128,18 @@ export class PedidosController {
   setCostoEnvio(@Param('id') id: string, @Body() body: { costoEnvio: number }) {
     return this.pedidosService.setCostoEnvio(id, body.costoEnvio);
   }
+
+  @Patch(':id/asignar')
+  @ApiOperation({
+    summary: 'Asignar repartidor y/o costo de envío',
+    description:
+      'Asigna un repartidor y/o actualiza el costo de envío de un pedido.',
+  })
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  asignarRepartidor(
+    @Param('id') id: string,
+    @Body() body: { repartidorId?: string; costoEnvio?: number },
+  ) {
+    return this.pedidosService.asignarRepartidor(id, body);
+  }
 }

@@ -22,6 +22,7 @@ model User {
   password  String
   nombre    String
   role      Role     @default(TRABAJADOR)
+  activo    Boolean  @default(true)
   pedidos   Pedido[] @relation("RepartidorPedidos") // Para el rol DELIVERY
   createdAt DateTime @default(now())
 }
@@ -159,6 +160,8 @@ enum TipoPedido {
 
 enum EstadoPedido {
   PENDIENTE
+  EN_PREPARACION
+  LISTO_PARA_RETIRAR
   EN_CAMINO
   ENTREGADO
   CANCELADO
@@ -469,6 +472,15 @@ model Configuracion {
   clave       String   @unique // Ej: "alias_transferencia", "whatsapp_numero"
   valor       String // Ej: "after.panch", "+5491123456789"
   descripcion String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Barrio {
+  id          String   @id @default(uuid())
+  nombre      String   @unique
+  precioEnvio Float    @default(0)
+  activo      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

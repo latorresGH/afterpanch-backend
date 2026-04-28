@@ -45,10 +45,11 @@ export class CajaService {
         );
       }
 
-      const montoTotal = Number(pedido.total);
+      const productosTotal = Number(pedido.total);
       const costoEnvio = Number(pedido.costoEnvio) || 0;
+      const montoTotal = productosTotal + costoEnvio;
       const gananciaRepart = gananciaRepartidor ?? costoEnvio;
-      const gananciaNegocio = montoTotal - gananciaRepart;
+      const gananciaNegocio = productosTotal;
 
       const movimiento = await tx.cajaMovimiento.create({
         data: {

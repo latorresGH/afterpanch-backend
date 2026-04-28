@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreatePedidoDto, TipoPedidoDto } from './dto/create-pedido.dto';
@@ -12,13 +13,27 @@ import { PedidosGateway } from './pedidos.gateway';
 
 const ESTADOS_ABIERTOS: EstadoPedido[] = [
   EstadoPedido.PENDIENTE,
+  EstadoPedido.EN_PREPARACION,
+  EstadoPedido.LISTO_PARA_RETIRAR,
   EstadoPedido.EN_CAMINO,
 ];
+
+const TRANSICIONES_VALIDAS: Record<EstadoPedido, EstadoPedido[]> = {
+  [EstadoPedido.PENDIENTE]: [EstadoPedido.EN_PREPARACION, EstadoPedido.CANCELADO],
+  [EstadoPedido.EN_PREPARACION]: [EstadoPedido.LISTO_PARA_RETIRAR, EstadoPedido.EN_CAMINO, EstadoPedido.CANCELADO],
+  [EstadoPedido.LISTO_PARA_RETIRAR]: [EstadoPedido.ENTREGADO, EstadoPedido.CANCELADO],
+  [EstadoPedido.EN_CAMINO]: [EstadoPedido.ENTREGADO, EstadoPedido.PROBLEMA_DIRECCION, EstadoPedido.CANCELADO],
+  [EstadoPedido.ENTREGADO]: [],
+  [EstadoPedido.CANCELADO]: [],
+  [EstadoPedido.PROBLEMA_DIRECCION]: [EstadoPedido.EN_CAMINO, EstadoPedido.CANCELADO],
+};
 
 const LIMITE_EXTRAS_GRATIS = 2;
 
 @Injectable()
 export class PedidosService {
+  private readonly logger = new Logger(PedidosService.name);
+
   constructor(
     private prisma: PrismaService,
     private ofertasCalculator: OfertasCalculatorService,
@@ -454,6 +469,7 @@ export class PedidosService {
             ...(shippingZoneName !== undefined ? { shippingZoneName } : {}),
             ...(shippingReason !== undefined ? { shippingReason } : {}),
             ...(direccionPrecision !== undefined ? { direccionPrecision } : {}),
+            ...(dto.repartidorId !== undefined ? { repartidorId: dto.repartidorId } : {}),
           },
           include: includeConfig,
         });
@@ -477,6 +493,7 @@ export class PedidosService {
             shippingZoneName: shippingZoneName ?? null,
             shippingReason: shippingReason ?? null,
             direccionPrecision: direccionPrecision ?? null,
+            repartidorId: dto.repartidorId ?? null,
             total: totalConOfertas,
             estado: EstadoPedido.PENDIENTE,
             detalles: { create: detallesCreate },
@@ -559,7 +576,7 @@ export class PedidosService {
           // Registrar movimiento para extras sin insumo asociado
           // Nota: No usamos stockMovimiento porque no hay un insumo relacionado
           // pero podríamos crear un log o usar una tabla específica para extras
-          console.log(`[STOCK] Extra ${extra.nombre} descontado: ${cantidadTotalDescontar} ${extra.unidadMedida || 'un'}`);
+          this.logger.log(`[STOCK] Extra ${extra.nombre} descontado: ${cantidadTotalDescontar} ${extra.unidadMedida || 'un'}`);
         }
       }
 
@@ -592,7 +609,7 @@ export class PedidosService {
           );
         }
 
-        console.log(`[STOCK] Aderezo ${aderezo?.nombre} descontado: ${cantidadTotalDescontar} ${aderezo?.unidadMedida || 'un'}`);
+        this.logger.log(`[STOCK] Aderezo ${aderezo?.nombre} descontado: ${cantidadTotalDescontar} ${aderezo?.unidadMedida || 'un'}`);
       }
 
       // ✅ Descontar stock de recetas con registro de movimientos
@@ -683,7 +700,7 @@ export class PedidosService {
       }
     }
 
-    console.warn(`[STOCK] Extra ${extra.nombre} no tiene configuración de consumo para categoría ${categoriaId}. Usando default=1`);
+    this.logger.warn(`[STOCK] Extra ${extra.nombre} no tiene configuración de consumo para categoría ${categoriaId}. Usando default=1`);
     return 1;
   }
 
@@ -702,7 +719,7 @@ export class PedidosService {
       }
     }
 
-    console.warn(`[STOCK] Aderezo ${aderezo.nombre} no tiene configuración de consumo para categoría ${categoriaId}. Usando default=1`);
+    this.logger.warn(`[STOCK] Aderezo ${aderezo.nombre} no tiene configuración de consumo para categoría ${categoriaId}. Usando default=1`);
     return 1;
   }
 
@@ -782,7 +799,7 @@ export class PedidosService {
   async cambiarEstado(id: string, nuevoEstado: EstadoPedido) {
     const pedidoExistente = await this.prisma.pedido.findUnique({
       where: { id },
-      select: { id: true, estado: true },
+      select: { id: true, estado: true, tipo: true },
     });
 
     if (!pedidoExistente) {
@@ -798,10 +815,39 @@ export class PedidosService {
       );
     }
 
+    // Transiciones según tipo de pedido
+    const transicionesDelTipo = this.getTransicionesPorTipo(pedidoExistente.tipo as TipoPedidoDto, pedidoExistente.estado);
+    if (!transicionesDelTipo.includes(nuevoEstado)) {
+      throw new BadRequestException(
+        `No se puede pasar de ${pedidoExistente.estado} a ${nuevoEstado}. Transiciones permitidas: ${transicionesDelTipo.join(', ')}`,
+      );
+    }
+
     return this.prisma.pedido.update({
       where: { id },
       data: { estado: nuevoEstado },
     });
+  }
+
+  private getTransicionesPorTipo(tipo: TipoPedidoDto, estadoActual: EstadoPedido): EstadoPedido[] {
+    // DELIVERY: PENDIENTE -> EN_CAMINO directo permitido
+    if (tipo === TipoPedidoDto.DELIVERY) {
+      switch (estadoActual) {
+        case EstadoPedido.PENDIENTE:
+          return [EstadoPedido.EN_PREPARACION, EstadoPedido.EN_CAMINO, EstadoPedido.CANCELADO];
+        case EstadoPedido.EN_PREPARACION:
+          return [EstadoPedido.EN_CAMINO, EstadoPedido.CANCELADO];
+        case EstadoPedido.EN_CAMINO:
+          return [EstadoPedido.ENTREGADO, EstadoPedido.PROBLEMA_DIRECCION, EstadoPedido.CANCELADO];
+        case EstadoPedido.PROBLEMA_DIRECCION:
+          return [EstadoPedido.EN_CAMINO, EstadoPedido.CANCELADO];
+        default:
+          return [];
+      }
+    }
+
+    // LOCAL / RETIRO: flujo completo con cocina
+    return TRANSICIONES_VALIDAS[estadoActual];
   }
 
   async finalizarPedido(id: string) {
@@ -978,6 +1024,45 @@ export class PedidosService {
     return this.prisma.pedido.update({
       where: { id },
       data: { costoEnvio: costoEnvioNum },
+    });
+  }
+
+  async asignarRepartidor(
+    id: string,
+    dto: { repartidorId?: string; costoEnvio?: number },
+  ) {
+    const pedido = await this.prisma.pedido.findUnique({
+      where: { id },
+      select: { id: true, estado: true },
+    });
+
+    if (!pedido) throw new NotFoundException('Pedido no encontrado');
+
+    if (
+      pedido.estado === EstadoPedido.ENTREGADO ||
+      pedido.estado === EstadoPedido.CANCELADO
+    ) {
+      throw new BadRequestException(
+        'No se puede modificar un pedido cerrado',
+      );
+    }
+
+    const data: any = {};
+    if (dto.repartidorId !== undefined) data.repartidorId = dto.repartidorId || null;
+    if (dto.costoEnvio !== undefined) {
+      const costo = Number(dto.costoEnvio);
+      if (!Number.isFinite(costo) || costo < 0) {
+        throw new BadRequestException('Costo de envío inválido');
+      }
+      data.costoEnvio = costo;
+    }
+
+    return this.prisma.pedido.update({
+      where: { id },
+      data,
+      include: {
+        repartidor: { select: { id: true, nombre: true } },
+      },
     });
   }
 }

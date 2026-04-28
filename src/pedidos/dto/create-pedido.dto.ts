@@ -185,6 +185,11 @@ export class CreatePedidoDto {
   @IsString()
   pedidoId?: string;
 
+  @ApiPropertyOptional({ description: 'ID del repartidor asignado' })
+  @IsOptional()
+  @IsString()
+  repartidorId?: string;
+
   @ApiPropertyOptional({
     description: 'Origen del pedido (MENU = pedido web, no se envía desde POS)',
   })

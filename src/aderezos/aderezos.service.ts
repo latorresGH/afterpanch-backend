@@ -19,9 +19,22 @@ export class AderezosService {
   constructor(private prisma: PrismaService) {}
 
   async create(createAderezoDto: CreateAderezoDto) {
+    const nombreLimpio = createAderezoDto.nombre.trim();
+    
+    const existente = await this.prisma.aderezo.findUnique({
+      where: { nombre: nombreLimpio },
+      select: { id: true, nombre: true },
+    });
+    
+    if (existente) {
+      throw new BadRequestException(
+        `Ya existe un aderezo llamado "${nombreLimpio}". Usá un nombre diferente o editá el existente.`,
+      );
+    }
+
     const aderezo = await this.prisma.aderezo.create({
       data: {
-        nombre: createAderezoDto.nombre.trim(),
+        nombre: nombreLimpio,
         stockActual: createAderezoDto.stockActual ?? 999,
         unidadMedida: createAderezoDto.unidadMedida ?? null,
         esGlobal: createAderezoDto.esGlobal ?? false,
@@ -183,6 +196,19 @@ export class AderezosService {
     dto: { nombre?: string; stockActual?: number; activo?: boolean; unidadMedida?: string; esGlobal?: boolean; categoriaIds?: string[] },
   ) {
     await this.findOne(id);
+
+    if (dto.nombre !== undefined) {
+      const nombreLimpio = dto.nombre.trim();
+      const existente = await this.prisma.aderezo.findUnique({
+        where: { nombre: nombreLimpio },
+        select: { id: true, nombre: true },
+      });
+      if (existente && existente.id !== id) {
+        throw new BadRequestException(
+          `Ya existe otro aderezo llamado "${nombreLimpio}". Usá un nombre diferente.`,
+        );
+      }
+    }
 
     const aderezo = await this.prisma.aderezo.update({
       where: { id },

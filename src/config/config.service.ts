@@ -62,6 +62,11 @@ export class NegocioConfigService implements OnModuleInit {
         valor: '23:30',
         descripcion: 'Hora de cierre del local (formato HH:MM)',
       },
+      {
+        clave: 'costo_envio_base',
+        valor: '3000',
+        descripcion: 'Costo base de envío (mostrado como estimado)',
+      },
     ];
 
     for (const item of defaults) {

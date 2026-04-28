@@ -5,6 +5,9 @@
   "author": "Laureano Torres",
   "private": true,
   "license": "Afterpanch",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "build": "prisma generate && nest build",
     "postinstall": "prisma generate",

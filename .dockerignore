@@ -1,0 +1,49 @@
+# Dependencias
+node_modules
+npm-debug.log
+
+# Build outputs
+dist
+build
+
+# Tests y coverage
+coverage
+.nyc_output
+test
+
+# Configuración de IDE
+.vscode
+.idea
+*.swp
+
+# Git
+.git
+.gitignore
+
+# Logs
+*.log
+logs
+
+# Variables de entorno locales (NUNCA al contenedor)
+.env
+.env.local
+.env.*.local
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Docker mismo
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs
+README.md
+docs
+
+# Cosas de NestJS
+.eslintrc.js
+.prettierrc
+nest-cli.json
+tsconfig.build.json

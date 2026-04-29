@@ -20,6 +20,9 @@ RUN npm ci
 COPY . .
 
 # Build (corre prisma generate && nest build)
+# DATABASE_URL dummy solo para que prisma generate no falle.
+# La real se inyecta en runtime desde docker-compose.
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public"
 RUN npm run build
 
 # Quitar dev dependencies para reducir tamaño

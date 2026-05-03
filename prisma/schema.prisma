@@ -241,6 +241,7 @@ model Extra {
   stockActual      Float    @default(0)
   activo           Boolean  @default(true)
   esGlobal         Boolean  @default(false)
+  esPremium        Boolean  @default(false)
   categoria        String   @default("ADEREZOS")
 
   insumoId         String?

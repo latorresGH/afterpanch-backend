@@ -43,6 +43,10 @@ export class UpdateExtraDto {
   esGlobal?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  esPremium?: boolean;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   categoriaIds?: string[];

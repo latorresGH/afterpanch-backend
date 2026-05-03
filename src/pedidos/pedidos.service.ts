@@ -163,6 +163,7 @@ export class PedidosService {
               precio: true,
               stockActual: true,
               activo: true,
+              esPremium: true,
               insumoId: true,
               unidadMedida: true,
               preciosPorCategoria: true,
@@ -349,10 +350,13 @@ export class PedidosService {
           }
         });
 
+        let gratisCount = 0;
         for (let idx = 0; idx < expanded.length; idx++) {
           const { extraId, extra } = expanded[idx];
           const precioExtra = this.getExtraPrecio(extra, categoriaId);
-          const cobrado = idx >= LIMITE_EXTRAS_GRATIS;
+          const esPremium = extra.esPremium === true;
+          const cobrado = esPremium || gratisCount >= LIMITE_EXTRAS_GRATIS;
+          if (!esPremium) gratisCount++;
           const precioFinal = cobrado ? precioExtra : 0;
           extrasCobradoTotal += precioFinal;
           extrasJsonArr.push({

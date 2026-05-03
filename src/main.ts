@@ -65,6 +65,6 @@ async function bootstrap() {
   await app.listen(port);
   console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
   console.log(`📚 Swagger disponible en http://localhost:${port}/api`);
-  console.log(`¡Hi! - Test.console.log`);
+  console.log(`¡Hi! -`);
 }
 bootstrap();

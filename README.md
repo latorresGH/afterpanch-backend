@@ -1,217 +1,544 @@
-```markdown
-# 🍕 AfterPanch Backend — API de Delivery para Pizzería
+# 🍕 AfterPanch Backend
 
-> API REST robusta y escalable para la gestión completa de un sistema de delivery de pizzería. Construida con **NestJS**, **Prisma ORM** y **PostgreSQL**. Maneja pedidos en tiempo real, productos con variantes de tamaño, sistema de toppings por grupos, control de stock con insumos, cálculo de envío por zonas, motor de ofertas y notificaciones en vivo vía WebSocket.
+<div align="center">
 
----
+API REST moderna y escalable para un sistema completo de delivery de pizzería.
+Construida con **NestJS**, **Prisma ORM** y **PostgreSQL**.
 
-## 🚀 Tecnologías
+Maneja pedidos en tiempo real, stock inteligente, toppings dinámicos, cálculo de envío por zonas y ofertas automáticas.
 
-| Stack | Herramienta |
-|-------|-------------|
-| **Framework** | [NestJS](https://nestjs.com/) (TypeScript) |
-| **ORM** | [Prisma](https://www.prisma.io/) 6 |
-| **Base de datos** | [PostgreSQL](https://www.postgresql.org/) |
-| **Real-time** | WebSocket (Gateway) |
-| **Validación** | class-validator, class-transformer |
-| **Autenticación** | JWT (Bearer tokens) |
-| **Generador de tickets** | Integración con impresora térmica |
+</div>
 
 ---
 
-## ✨ Características
+## 🚀 Stack Tecnológico
 
-### 📦 Gestión de Productos
-- **Variantes de tamaño**: Chica, Mediana, Grande, Familiar — cada una con precio independiente (fijo o multiplicador)
-- **Tipos de masa**: Fina, gruesa, borde de queso, sin TACC — con costo adicional configurable
-- **Recetas dinámicas (Escandallo)**: Vinculación de productos con insumos para descuento automático de stock al confirmar pedido
-- **Categorías**: Organización del menú (Clásicas, Especiales, Vegetarianas, Empanadas, Bebidas, Postres) con orden personalizado
-- **Código único**: Cada producto puede tener un código interno para referencia en cocina
-- **Imágenes**: URL de imagen por producto para visualización en el menú
+<div align="center">
 
-### 🧀 Sistema de Toppings
-- **Grupos de toppings**: Quesos, Carnes, Vegetales, Premium — cada grupo con reglas independientes de selección
-- **Toppings incluidos**: Configuración de cuántos toppings del grupo vienen en el precio base (ej: "hasta 3 quesos incluidos")
-- **Toppings premium**: Marcados como `esPremium`, se cobran siempre independientemente del límite de incluidos
-- **Precio por categoría**: Un mismo topping puede tener precio distinto según la categoría de pizza (ej: bacon cuesta más en especial que en clásica)
-- **Stock por insumo**: Vinculación opcional a materias primas — al usarse un topping se descuenta del insumo asociado
-- **Consumo configurable**: Cantidad de insumo que se consume por topping según el tamaño de pizza (ej: 50g de bacon para chica, 80g para grande)
-- **Visibilidad**: Global (aparece en todas las pizzas) o filtrado por categorías específicas
+| Tecnología                      | Uso                                |
+| ------------------------------- | ---------------------------------- |
+| **NestJS**                      | Framework Backend                  |
+| **TypeScript**                  | Lenguaje principal                 |
+| **Prisma ORM**                  | Acceso y modelado de base de datos |
+| **PostgreSQL**                  | Base de datos relacional           |
+| **WebSocket Gateway**           | Eventos en tiempo real             |
+| **JWT Auth**                    | Autenticación                      |
+| **class-validator**             | Validaciones DTO                   |
+| **Thermal Printer Integration** | Tickets e impresión                |
 
-### 🛒 Pedidos
-- **Tipos de pedido**: `LOCAL` (comer en el local), `DELIVERY` (envío a domicilio), `RETIRO` (paso a buscar)
-- **Estados del flujo**: `PENDIENTE` → `EN_PREPARACION` → `LISTO_PARA_RETIRAR` / `EN_CAMINO` → `ENTREGADO` / `CANCELADO`
-- **Estados especiales**: `PROBLEMA_DIRECCION` para delivery con inconvenientes
-- **Transiciones validadas**: No se puede saltar estados inválidos según el tipo de pedido
-- **WebSocket en vivo**: Notificaciones instantáneas a cocina/dashboard cuando entra un nuevo pedido
-- **Media y media**: Soporte para pizzas con dos sabores distintos (modelo `PizzaMediaMedia`)
-- **Notas por línea**: Aclaraciones por producto ("sin aceitunas", "bien cocida", "sin salsa")
-- **Datos del cliente**: Nombre, apellido, teléfono — capturados según el tipo de pedido
-- **Método de pago**: Efectivo, Transferencia, Tarjeta
-
-### 📍 Envíos y Zonas de Entrega
-- **Barrios**: Cada barrio tiene su costo de envío configurado individualmente
-- **Zonas por polígono**: Definición de zonas de envío con GeoJSON (`ShippingZone`)
-- **Radio de entrega**: Configuración de radio máximo desde el local con precio base (`ShippingConfig`)
-- **Tiers por distancia**: Precio escalonado según kilómetros (`ShippingRadiusTier`: 0-3km, 3-5km, 5-8km, etc.)
-- **Geocoding**: Caché de direcciones con Nominatim (OpenStreetMap) — modelo `GeocodingCache`
-- **Cálculo inteligente**: Determina si la dirección está dentro de una zona, dentro del radio, o fuera de rango
-- **Tolerancia de borde**: Margen de metros para direcciones cerca del límite de zona
-
-### 🎯 Sistema de Ofertas
-- **2x1**: Dos productos por el precio de uno
-- **Combos**: Grupos de productos donde se elige X de cada grupo con precio especial
-- **Descuento porcentaje**: X% de descuento en productos seleccionados
-- **Descuento fijo**: $X de descuento directo sobre el total
-- **Restricciones configurables**:
-  - Días de la semana aplicables
-  - Horario de inicio y fin
-  - Usos máximos por cliente
-  - Usos máximos totales
-  - Estado: Activa, Pausada, Vencida
-- **Cálculo automático**: El motor de ofertas (`OfertasCalculatorService`) calcula el mejor descuento al crear el pedido
-- **Aplicación por línea o por pedido**: Configuración flexible
-
-### 📊 Control de Stock
-- **Insumos**: Materias primas con stock actual, stock mínimo, unidad de medida (gr, ml, un, feta, sobre)
-- **Movimientos de stock**: Historial completo con tipo (`DESCUENTO_PEDIDO`, `AJUSTE_MANUAL`, `REPOSICION`), cantidad, stock antes/después, motivo
-- **Descuento automático**: Al crear un pedido se descuenta según la receta del producto + toppings seleccionados
-- **Reintegro por cancelación**: Al cancelar un pedido se restaura el stock de insumos, toppings y aderezos
-- **Validación previa**: Antes de crear el pedido se verifica que haya stock suficiente — si no, rechaza con mensaje claro
-- **Proveedores**: Vinculación de insumos con proveedores (nombre, teléfono, email, notas)
-- **Alertas**: Stock mínimo configurable por insumo
-
-### 👥 Roles y Permisos
-| Rol | Descripción |
-|-----|-------------|
-| **ADMIN** | Acceso total: configuración, stock, productos, ofertas, usuarios, caja |
-| **TRABAJADOR** | Gestión de pedidos, atención en local, cocina, consulta de precios |
-| **DELIVERY** | Solo ve pedidos asignados para repartir, puede cambiar estado a "Entregado" |
-| **CLIENTE** | Acceso al menú público y estado de sus pedidos |
-
-### 💰 Caja y Finanzas
-- **Movimientos de caja**: Registro de entradas y salidas vinculadas a pedidos
-- **Ganancia del negocio**: Cálculo automático basado en costo de insumos vs precio de venta
-- **Ganancia del repartidor**: Porcentaje o monto fijo por delivery
-- **Confirmación**: Los movimientos pueden requerir confirmación de un admin
-
-### ⚙️ Configuración del Negocio
-- **Horarios**: Hora de apertura y cierre — el sistema rechaza pedidos fuera de horario
-- **Alias de transferencia**: Para mostrar en el checkout al cliente
-- **WhatsApp**: Número para contacto y envío de comprobantes
-- **Datos del local**: Nombre, dirección, coordenadas GPS para cálculo de envío
+</div>
 
 ---
 
-## 📁 Estructura del Proyecto
+# ✨ Funcionalidades
 
+---
+
+## 📦 Gestión de Productos
+
+Sistema flexible para manejar productos complejos de delivery.
+
+### Incluye
+
+* Variantes de tamaño:
+
+  * Chica
+  * Mediana
+  * Grande
+  * Familiar
+
+* Tipos de masa:
+
+  * Fina
+  * Gruesa
+  * Borde relleno
+  * Sin TACC
+
+* Categorías personalizadas
+
+* Código interno de cocina
+
+* Imagen por producto
+
+* Recetas dinámicas (escandallo)
+
+* Descuento automático de insumos
+
+### Ejemplo
+
+```txt
+Pizza Especial
+ ├── Grande → $14.000
+ ├── Familiar → $18.500
+ └── Masa borde queso → +$2.000
 ```
+
+---
+
+## 🧀 Sistema de Toppings
+
+Sistema avanzado de toppings por grupos y reglas dinámicas.
+
+### Características
+
+* Grupos independientes:
+
+  * Quesos
+  * Carnes
+  * Vegetales
+  * Premium
+
+* Límite de toppings incluidos
+
+* Toppings premium siempre cobrados
+
+* Precios variables según categoría
+
+* Consumo configurable por tamaño
+
+* Integración con stock de insumos
+
+* Visibilidad global o filtrada
+
+### Ejemplo
+
+```txt
+Pizza Clásica
+ ├── Hasta 3 quesos incluidos
+ ├── Bacon → Premium (+$1500)
+ └── Extra mozzarella → +80gr stock
+```
+
+---
+
+## 🛒 Gestión de Pedidos
+
+Flujo completo de pedidos en tiempo real.
+
+### Tipos
+
+* 🏠 DELIVERY
+* 🍽️ LOCAL
+* 🛍️ RETIRO
+
+### Estados
+
+```txt
+PENDIENTE
+   ↓
+EN_PREPARACION
+   ↓
+LISTO_PARA_RETIRAR / EN_CAMINO
+   ↓
+ENTREGADO
+```
+
+### Funciones
+
+* Validación de transiciones
+* WebSocket en vivo
+* Media y media
+* Notas por línea
+* Métodos de pago
+* Datos de cliente
+* Problemas de dirección
+
+---
+
+## 📍 Sistema de Envíos
+
+Motor inteligente de cálculo de delivery.
+
+### Soporta
+
+* Barrios con precio fijo
+* Zonas mediante polígonos GeoJSON
+* Radio máximo configurable
+* Precio por distancia
+* Geocoding con OpenStreetMap
+* Caché de direcciones
+* Tolerancia de bordes
+
+### Ejemplo de tiers
+
+```txt
+0km - 3km  → $1200
+3km - 5km  → $1800
+5km - 8km  → $2500
+```
+
+---
+
+## 🎯 Sistema de Ofertas
+
+Motor de promociones configurable.
+
+### Tipos disponibles
+
+* 2x1
+* Combos
+* Descuento porcentual
+* Descuento fijo
+
+### Restricciones
+
+* Días específicos
+* Horarios
+* Límite por cliente
+* Límite total
+* Estado activo/pausado/vencido
+
+### Extras
+
+* Mejor descuento automático
+* Aplicación por línea o pedido completo
+
+---
+
+## 📊 Control de Stock
+
+Control automático y trazable de insumos.
+
+### Funcionalidades
+
+* Insumos con stock mínimo
+* Movimientos históricos
+* Descuento automático
+* Reintegro por cancelación
+* Validación previa de stock
+* Gestión de proveedores
+* Alertas automáticas
+
+### Tipos de movimiento
+
+```txt
+DESCUENTO_PEDIDO
+AJUSTE_MANUAL
+REPOSICION
+```
+
+---
+
+## 👥 Roles y Permisos
+
+<div align="center">
+
+| Rol              | Acceso           |
+| ---------------- | ---------------- |
+| 👑 ADMIN         | Acceso completo  |
+| 👨‍🍳 TRABAJADOR | Cocina y pedidos |
+| 🛵 DELIVERY      | Repartos         |
+| 🍕 CLIENTE       | Menú y pedidos   |
+
+</div>
+
+---
+
+## 💰 Caja y Finanzas
+
+### Incluye
+
+* Movimientos de caja
+* Entradas y salidas
+* Ganancia del negocio
+* Ganancia del repartidor
+* Confirmaciones administrativas
+
+---
+
+## ⚙️ Configuración del Negocio
+
+### Configurable desde panel admin
+
+* Horarios de apertura/cierre
+* Alias de transferencia
+* WhatsApp del local
+* Dirección y coordenadas
+* Datos generales del negocio
+
+---
+
+# 📡 Tiempo Real
+
+El sistema utiliza WebSockets para actualizar automáticamente:
+
+* Nuevos pedidos
+* Cambios de estado
+* Dashboard de cocina
+* Pedidos asignados a delivery
+* Notificaciones administrativas
+
+---
+
+# 🧠 Arquitectura
+
+```txt
+Client App
+    ↓
+REST API (NestJS)
+    ↓
+Services Layer
+    ↓
+Prisma ORM
+    ↓
+PostgreSQL
+```
+
+---
+
+# 🔒 Seguridad
+
+* JWT Authentication
+* Roles & Guards
+* DTO Validation
+* Sanitización de inputs
+* Validación de permisos
+* Protección de rutas privadas
+
+---
+
+# 📁 Estructura del Proyecto
+
+```txt
+src/
+├── auth/
+├── users/
+├── products/
+├── toppings/
+├── orders/
+├── delivery/
+├── offers/
+├── stock/
+├── finance/
+├── websocket/
+├── config/
+├── prisma/
+└── common/
+```
+
+---
+
+# 🚀 Objetivo
+
+AfterPanch Backend fue diseñado para ser:
+
+* Escalable
+* Modular
+* Real-time
+* Fácil de mantener
+* Preparado para múltiples sucursales
+* Optimizado para alto volumen de pedidos
+
+---
+
+<div align="center">
+
+### 🍕 AfterPanch Backend
+
+Sistema profesional de delivery desarrollado con arquitectura moderna.
+
+</div>
+
+
+
+```bash
 afterpanch-backend/
 ├── prisma/
-│   ├── schema.prisma              # Modelos completos de base de datos
-│   └── migrations/                # Historial de migraciones aplicadas
 ├── src/
-│   ├── auth/                      # Autenticación JWT, guards, estrategias
-│   ├── pedidos/                   # CRUD de pedidos, validaciones, gateway WebSocket
-│   ├── pedidos/pedidos.service.ts # Lógica de cobro, stock, ofertas
-│   ├── productos/                 # CRUD de productos, categorías, variantes
-│   ├── extras/                    # Sistema de toppings/extras con grupos
-│   ├── insumos/                   # Control de stock, proveedores, movimientos
-│   ├── ofertas/                   # Motor de ofertas y descuentos
-│   ├── ofertas/ofertas-calculator.service.ts # Cálculo automático de descuentos
-│   ├── shipping/                  # Zonas de envío, geocoding, cálculo de precio
-│   ├── config/                    # Configuración del negocio (horarios, alias, etc.)
-│   ├── caja/                      # Movimientos de caja y finanzas
-│   ├── usuarios/                  # Gestión de usuarios y roles
-│   ├── aderezos/                  # Salsas para mojar (gratuitas con límite)
-│   ├── barrios/                   # CRUD de barrios con precio de envío
-│   ├── main.ts                    # Entry point de la aplicación
-│   └── app.module.ts              # Módulo raíz
-├── .env.example                   # Variables de entorno de ejemplo
-├── nest-cli.json                  # Configuración de NestJS CLI
-├── tsconfig.json                  # Configuración de TypeScript
+│   ├── auth/
+│   ├── pedidos/
+│   ├── productos/
+│   ├── extras/
+│   ├── insumos/
+│   ├── ofertas/
+│   ├── shipping/
+│   ├── config/
+│   ├── caja/
+│   ├── usuarios/
+│   ├── aderezos/
+│   ├── barrios/
+│   ├── main.ts
+│   └── app.module.ts
+├── .env.example
+├── nest-cli.json
+├── tsconfig.json
 └── package.json
 ```
 
 ---
 
-## 🗃️ Modelos de Base de Datos
 
-```
-User                    → Usuarios del sistema (admin, trabajador, delivery, cliente)
-Producto                → Productos del menú (pizzas, empanadas, bebidas, etc.)
-ProductoVariante        → Tamaños: Chica, Mediana, Grande, Familiar
-ProductoReceta          → Receta/escandallo: vincula producto con insumos y cantidades
-Categoria               → Categorías del menú con orden y descripción
-ToppingGrupo            → Grupos de toppings (Quesos, Carnes, Vegetales, Premium)
-Topping                 → Toppings individuales con precio, stock, grupo
-ToppingPrecio           → Precio de topping por categoría de producto
-ToppingConsumo          → Cantidad de insumo consumido por topping según categoría
-ToppingCategoria        → Categorías de producto donde aplica cada topping
-Aderezo                 → Salsas para mojar (marinara, garlic, ranch, etc.)
-AderezoPrecio           → Precio de aderezo por categoría
-AderezoConsumo          → Consumo de aderezo por categoría
-AderezoCategoria        → Categorías donde aplica cada aderezo
-Insumo                  → Materias primas con stock y proveedor
-Proveedor               → Proveedores de insumos
-StockMovimiento         → Historial de movimientos de stock
-Pedido                  → Pedidos con tipo, estado, datos del cliente, dirección
-PedidoDetalle           → Líneas del pedido con producto, cantidad, toppings, notas
-PedidoOferta            → Ofertas aplicadas a cada pedido
-TipoMasa                → Tipos de masa disponibles (fina, gruesa, borde de queso)
-PizzaMediaMedia         → Pizzas con dos sabores distintos
-Oferta                  → Ofertas activas con tipo, restricciones, vigencia
-OfertaProducto          → Productos vinculados a una oferta
-GrupoCombo              → Grupos de selección dentro de un combo
-GrupoOpcion             → Opciones disponibles en cada grupo de combo
-ShippingConfig          → Configuración general de envío (radio, modo, precio)
-ShippingZone            → Zonas de envío con polígono GeoJSON
-ShippingRadiusTier      → Tiers de precio por distancia
-Barrio                  → Barrios con precio de envío
-GeocodingCache          → Caché de geocoding de direcciones
-CajaMovimiento          → Movimientos de entrada/salida de caja
-Configuracion           → Clave-valor para configuración del negocio
+# 🗃️ Modelos de Base de Datos
+
+## 👥 Usuarios y Roles
+
+| Modelo | Descripción |
+|---|---|
+| `User` | Usuarios del sistema (admin, trabajador, delivery, cliente) |
+
+---
+
+## 🍕 Productos y Menú
+
+| Modelo | Descripción |
+|---|---|
+| `Producto` | Productos del menú |
+| `ProductoVariante` | Tamaños: Chica, Mediana, Grande, Familiar |
+| `Categoria` | Categorías del menú |
+| `TipoMasa` | Tipos de masa disponibles |
+| `PizzaMediaMedia` | Pizzas con dos sabores |
+
+---
+
+## 🧾 Recetas y Stock
+
+| Modelo | Descripción |
+|---|---|
+| `ProductoReceta` | Escandallo de productos |
+| `Insumo` | Materias primas |
+| `Proveedor` | Proveedores |
+| `StockMovimiento` | Historial de movimientos |
+
+---
+
+## 🧀 Toppings y Aderezos
+
+| Modelo | Descripción |
+|---|---|
+| `ToppingGrupo` | Grupos de toppings |
+| `Topping` | Toppings individuales |
+| `ToppingPrecio` | Precio según categoría |
+| `ToppingConsumo` | Consumo de insumos |
+| `ToppingCategoria` | Categorías donde aplica |
+| `Aderezo` | Salsas y extras |
+| `AderezoPrecio` | Precio por categoría |
+| `AderezoConsumo` | Consumo por categoría |
+| `AderezoCategoria` | Categorías compatibles |
+
+---
+
+## 🛒 Pedidos
+
+| Modelo | Descripción |
+|---|---|
+| `Pedido` | Pedido principal |
+| `PedidoDetalle` | Líneas del pedido |
+| `PedidoOferta` | Ofertas aplicadas |
+
+---
+
+## 🎯 Ofertas y Combos
+
+| Modelo | Descripción |
+|---|---|
+| `Oferta` | Ofertas activas |
+| `OfertaProducto` | Productos vinculados |
+| `GrupoCombo` | Grupos de selección |
+| `GrupoOpcion` | Opciones de combo |
+
+---
+
+## 📍 Delivery y Envíos
+
+| Modelo | Descripción |
+|---|---|
+| `ShippingConfig` | Configuración general |
+| `ShippingZone` | Zonas GeoJSON |
+| `ShippingRadiusTier` | Tiers por distancia |
+| `Barrio` | Barrios con costo fijo |
+| `GeocodingCache` | Caché de direcciones |
+
+---
+
+## 💰 Caja y Configuración
+
+| Modelo | Descripción |
+|---|---|
+| `CajaMovimiento` | Entradas y salidas |
+| `Configuracion` | Configuración global |
+
+---
+
+# 🛠️ Instalación y Ejecución
+
+## 1️⃣ Clonar repositorio
+
+```bash
+git clone <repo-url>
+cd afterpanch-backend
 ```
 
 ---
 
-## 🛠️ Instalación y Ejecución
+## 2️⃣ Instalar dependencias
 
 ```bash
-# Clonar el repositorio
-git clone <repo-url>
-cd afterpanch-backend
-
-# Instalar dependencias
 npm install
-
-# Configurar variables de entorno
-cp .env.example .env
-# Editar DATABASE_URL con tu conexión PostgreSQL
-# Ejemplo: DATABASE_URL=postgresql://user:password@localhost:5432/afterpanch
-
-# Generar cliente de Prisma
-npx prisma generate
-
-# Aplicar migraciones a la base de datos
-npx prisma migrate dev
-
-# (Opcional) Abrir Prisma Studio para ver los datos
-npx prisma studio
-
-# Levantar en modo desarrollo (con hot-reload)
-npm run start:dev
-
-# Levantar en modo debug
-npm run start:debug
-
-# Build para producción
-npm run build
-
-# Ejecutar en producción
-npm run start:prod
 ```
 
+---
+
+## 3️⃣ Configurar entorno
+
+```bash
+cp .env.example .env
+```
+
+Editar:
+
+```env
+DATABASE_URL=postgresql://user:password@localhost:5432/afterpanch
+```
+
+---
+
+## 4️⃣ Prisma
+
+### Generar cliente
+
+```bash
+npx prisma generate
+```
+
+### Aplicar migraciones
+
+```bash
+npx prisma migrate dev
+```
+
+### Abrir Prisma Studio
+
+```bash
+npx prisma studio
+```
+
+---
+
+## 5️⃣ Ejecutar proyecto
+
+### Desarrollo
+
+```bash
+npm run start:dev
+```
+
+### Debug
+
+```bash
+npm run start:debug
+```
+
+### Build producción
+
+```bash
+npm run build
+```
+
+### Ejecutar producción
+
+```bash
+npm run start:prod
+```
 ---
 
 ## 🔌 Endpoints Principales

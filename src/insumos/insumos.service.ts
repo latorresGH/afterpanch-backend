@@ -232,6 +232,7 @@ export class InsumosService {
     const agrupado = new Map<string, { insumoId: string; nombre: string; unidadMedida: string; totalConsumido: number; cantidadMovimientos: number }>();
 
     for (const m of movimientos) {
+      if (!m.insumoId || !m.insumo) continue;
       const key = m.insumoId;
       const existente = agrupado.get(key);
       if (existente) {

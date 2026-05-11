@@ -1038,11 +1038,11 @@ export class PedidosService {
             const cantidadConsumo = this.getAderezoConsumo(aderezoData, categoriaId);
             const cantidadRestaurar = cantidadConsumo * detalle.cantidad;
 
-            const aderezo = await tx.aderezo.findUnique({
+            const aderezoDb = await tx.aderezo.findUnique({
               where: { id: aderezo.id },
               select: { nombre: true, stockActual: true, unidadMedida: true },
             });
-            const stockAntes = Number(aderezo?.stockActual ?? 0);
+            const stockAntes = Number(aderezoDb?.stockActual ?? 0);
 
             await tx.aderezo.update({
               where: { id: aderezo.id },
@@ -1057,7 +1057,7 @@ export class PedidosService {
                 stockAntes,
                 stockDespues: stockAntes + cantidadRestaurar,
                 pedidoId: id,
-                motivo: `Cancelación pedido: reposición aderezo ${aderezo?.nombre} (${cantidadConsumo}${aderezo?.unidadMedida || 'un'} x ${detalle.cantidad})`,
+                motivo: `Cancelación pedido: reposición aderezo ${aderezoDb?.nombre} (${cantidadConsumo}${aderezoDb?.unidadMedida || 'un'} x ${detalle.cantidad})`,
               },
             });
           }

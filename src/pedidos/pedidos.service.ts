@@ -577,14 +577,21 @@ export class PedidosService {
             );
           }
 
-          // Registrar movimiento para extras sin insumo asociado
-          // Nota: No usamos stockMovimiento porque no hay un insumo relacionado
-          // pero podríamos crear un log o usar una tabla específica para extras
-          this.logger.log(`[STOCK] Extra ${extra.nombre} descontado: ${cantidadTotalDescontar} ${extra.unidadMedida || 'un'}`);
+          await tx.stockMovimiento.create({
+            data: {
+              extraId: e.extraId,
+              tipo: 'DESCUENTO_PEDIDO',
+              cantidad: -cantidadTotalDescontar,
+              stockAntes,
+              stockDespues: stockAntes - cantidadTotalDescontar,
+              pedidoId: pedidoResult.id,
+              motivo: `Consumo por extra: ${extra.nombre} (${cantidadConsumo}${extra.unidadMedida || 'un'} x ${e.cantidad})`,
+            },
+          });
         }
       }
 
-      // ✅ Descontar stock de aderezos con consumo configurable
+      // ✅ Descontar stock de aderezos con registro de movimientos
       for (const item of todosLosAderezosDescontar) {
         const aderezoData = aderezoMap.get(item.aderezoId);
         const cantidadConsumo = this.getAderezoConsumo(aderezoData, item.categoriaId);
@@ -613,7 +620,17 @@ export class PedidosService {
           );
         }
 
-        this.logger.log(`[STOCK] Aderezo ${aderezo?.nombre} descontado: ${cantidadTotalDescontar} ${aderezo?.unidadMedida || 'un'}`);
+        await tx.stockMovimiento.create({
+          data: {
+            aderezoId: item.aderezoId,
+            tipo: 'DESCUENTO_PEDIDO',
+            cantidad: -cantidadTotalDescontar,
+            stockAntes,
+            stockDespues: stockAntes - cantidadTotalDescontar,
+            pedidoId: pedidoResult.id,
+            motivo: `Consumo por aderezo: ${aderezo?.nombre} (${cantidadConsumo}${aderezo?.unidadMedida || 'un'} x ${item.cantidad})`,
+          },
+        });
       }
 
       // ✅ Descontar stock de recetas con registro de movimientos
@@ -889,6 +906,7 @@ export class PedidosService {
               producto: {
                 select: {
                   id: true,
+                  categoriaId: true,
                   receta: {
                     include: { insumo: { select: { id: true } } },
                   },
@@ -914,7 +932,42 @@ export class PedidosService {
       const motivoLimpio = (motivo || '').trim();
       if (!motivoLimpio) throw new BadRequestException('Motivo obligatorio');
 
+      // Pre-load extras and aderezos with their consumosPorCategoria
+      const extraIds = new Set<string>();
+      const aderezoIds = new Set<string>();
+
       for (const detalle of pedido.detalles) {
+        const extrasJson = detalle.extras as any[] | null;
+        if (extrasJson && Array.isArray(extrasJson)) {
+          for (const ex of extrasJson) {
+            extraIds.add(ex.id);
+          }
+        }
+        for (const aderezo of detalle.aderezos) {
+          aderezoIds.add(aderezo.id);
+        }
+      }
+
+      const extrasDb = extraIds.size > 0
+        ? await tx.extra.findMany({
+            where: { id: { in: Array.from(extraIds) } },
+            select: { id: true, insumoId: true, nombre: true, unidadMedida: true, consumosPorCategoria: true },
+          })
+        : [];
+      const extraMap = new Map(extrasDb.map(e => [e.id, e]));
+
+      const aderezosDb = aderezoIds.size > 0
+        ? await tx.aderezo.findMany({
+            where: { id: { in: Array.from(aderezoIds) } },
+            select: { id: true, nombre: true, unidadMedida: true, stockActual: true, consumosPorCategoria: true },
+          })
+        : [];
+      const aderezoMap = new Map(aderezosDb.map(a => [a.id, a]));
+
+      for (const detalle of pedido.detalles) {
+        const categoriaId = detalle.producto.categoriaId;
+
+        // Restaurar stock de extras usando consumo por categoría
         const extrasJson = detalle.extras as any[] | null;
         if (extrasJson && Array.isArray(extrasJson)) {
           const extrasCount = new Map<string, number>();
@@ -923,34 +976,94 @@ export class PedidosService {
             extrasCount.set(ex.id, count + 1);
           }
           for (const [extraId, count] of extrasCount) {
+            const extraData = extraMap.get(extraId);
+            const cantidadConsumo = this.getExtraConsumo(extraData, categoriaId);
+            const cantidadRestaurar = cantidadConsumo * count;
+
             const extra = await tx.extra.findUnique({
               where: { id: extraId },
-              select: { insumoId: true },
+              select: { insumoId: true, nombre: true, unidadMedida: true, stockActual: true },
             });
 
             if (extra?.insumoId) {
+              const insumo = await tx.insumo.findUnique({
+                where: { id: extra.insumoId },
+                select: { stockActual: true, nombre: true },
+              });
+              const stockAntes = Number(insumo?.stockActual ?? 0);
+
               await tx.insumo.update({
                 where: { id: extra.insumoId },
-                data: { stockActual: { increment: count } },
+                data: { stockActual: { increment: cantidadRestaurar } },
+              });
+
+              await tx.stockMovimiento.create({
+                data: {
+                  insumoId: extra.insumoId,
+                  tipo: 'REPOSICION',
+                  cantidad: cantidadRestaurar,
+                  stockAntes,
+                  stockDespues: stockAntes + cantidadRestaurar,
+                  pedidoId: id,
+                  motivo: `Cancelación pedido: reposición extra ${extra.nombre} (${cantidadConsumo}${extra.unidadMedida || 'un'} x ${count})`,
+                },
               });
             } else {
+              const stockAntes = Number(extra?.stockActual ?? 0);
+
               await tx.extra.update({
                 where: { id: extraId },
-                data: { stockActual: { increment: count } },
+                data: { stockActual: { increment: cantidadRestaurar } },
+              });
+
+              await tx.stockMovimiento.create({
+                data: {
+                  extraId,
+                  tipo: 'REPOSICION',
+                  cantidad: cantidadRestaurar,
+                  stockAntes,
+                  stockDespues: stockAntes + cantidadRestaurar,
+                  pedidoId: id,
+                  motivo: `Cancelación pedido: reposición extra ${extra?.nombre} (${cantidadConsumo}${extra?.unidadMedida || 'un'} x ${count})`,
+                },
               });
             }
           }
         }
 
+        // Restaurar stock de aderezos usando consumo por categoría
         if (detalle.aderezos && detalle.aderezos.length > 0) {
           for (const aderezo of detalle.aderezos) {
+            const aderezoData = aderezoMap.get(aderezo.id);
+            const cantidadConsumo = this.getAderezoConsumo(aderezoData, categoriaId);
+            const cantidadRestaurar = cantidadConsumo * detalle.cantidad;
+
+            const aderezo = await tx.aderezo.findUnique({
+              where: { id: aderezo.id },
+              select: { nombre: true, stockActual: true, unidadMedida: true },
+            });
+            const stockAntes = Number(aderezo?.stockActual ?? 0);
+
             await tx.aderezo.update({
               where: { id: aderezo.id },
-              data: { stockActual: { increment: detalle.cantidad } },
+              data: { stockActual: { increment: cantidadRestaurar } },
+            });
+
+            await tx.stockMovimiento.create({
+              data: {
+                aderezoId: aderezo.id,
+                tipo: 'REPOSICION',
+                cantidad: cantidadRestaurar,
+                stockAntes,
+                stockDespues: stockAntes + cantidadRestaurar,
+                pedidoId: id,
+                motivo: `Cancelación pedido: reposición aderezo ${aderezo?.nombre} (${cantidadConsumo}${aderezo?.unidadMedida || 'un'} x ${detalle.cantidad})`,
+              },
             });
           }
         }
 
+        // Restaurar stock de recetas (insumos)
         if (detalle.producto.receta && detalle.producto.receta.length > 0) {
           for (const recetaItem of detalle.producto.receta) {
             const cantidadRestaurar = recetaItem.cantidad * detalle.cantidad;

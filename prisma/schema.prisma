@@ -55,8 +55,12 @@ model Insumo {
 
 model StockMovimiento {
   id           String   @id @default(uuid())
-  insumoId     String
-  insumo       Insumo   @relation(fields: [insumoId], references: [id])
+  insumoId     String?
+  insumo       Insumo?  @relation(fields: [insumoId], references: [id])
+  extraId      String?
+  extra        Extra?   @relation(fields: [extraId], references: [id])
+  aderezoId    String?
+  aderezo      Aderezo? @relation(fields: [aderezoId], references: [id])
   tipo         String   // DESCUENTO_PEDIDO | AJUSTE_MANUAL | REPOSICION
   cantidad     Float    // negativo si se descontó, positivo si se repuso
   stockAntes   Float
@@ -67,6 +71,8 @@ model StockMovimiento {
   createdAt    DateTime @default(now())
 
   @@index([insumoId])
+  @@index([extraId])
+  @@index([aderezoId])
   @@index([createdAt])
 }
 
@@ -250,6 +256,7 @@ model Extra {
   preciosPorCategoria ExtraPrecio[]
   categoriasAplica    ExtraCategoria[]
   consumosPorCategoria ExtraConsumo[]
+  stockMovimientos     StockMovimiento[]
 
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -302,6 +309,7 @@ model Aderezo {
   categoriasAplica     AderezoCategoria[]
   detalles             PedidoDetalle[]
   consumosPorCategoria AderezoConsumo[]
+  stockMovimientos     StockMovimiento[]
 }
 
 model AderezoCategoria {

@@ -35,14 +35,14 @@ export class InsumosController {
     body: {
       nombre: string;
       stockInicial: number;
-      unidad: string;
+      unidadMedida: string;
       proveedorId?: string | null;
     },
   ) {
     return this.insumosService.crear(
       body.nombre,
       body.stockInicial,
-      body.unidad,
+      body.unidadMedida,
       body.proveedorId ?? null,
     );
   }

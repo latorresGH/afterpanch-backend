@@ -210,6 +210,12 @@ export class AderezosService {
       }
     }
 
+    const aderezoAntes = await this.prisma.aderezo.findUnique({
+      where: { id },
+      select: { stockActual: true },
+    });
+    const stockAntes = Number(aderezoAntes?.stockActual ?? 0);
+
     const aderezo = await this.prisma.aderezo.update({
       where: { id },
       data: {
@@ -223,6 +229,23 @@ export class AderezosService {
       },
       include: ADEREZO_INCLUDE,
     });
+
+    if (dto.stockActual !== undefined) {
+      const stockDespues = Number(dto.stockActual);
+      if (stockDespues !== stockAntes) {
+        const diferencia = stockDespues - stockAntes;
+        await this.prisma.stockMovimiento.create({
+          data: {
+            aderezoId: id,
+            tipo: 'AJUSTE_MANUAL',
+            cantidad: diferencia,
+            stockAntes,
+            stockDespues,
+            motivo: `Stock ajustado de ${stockAntes} a ${stockDespues}`,
+          },
+        });
+      }
+    }
 
     if (dto.categoriaIds !== undefined) {
       await this.prisma.aderezoCategoria.deleteMany({
@@ -259,11 +282,30 @@ export class AderezosService {
     if (!Number.isFinite(cant) || cant <= 0)
       throw new BadRequestException('Cantidad inválida');
 
-    return this.prisma.aderezo.update({
+    const aderezo = await this.prisma.aderezo.findUnique({
+      where: { id },
+      select: { stockActual: true, nombre: true, unidadMedida: true },
+    });
+    const stockAntes = Number(aderezo?.stockActual ?? 0);
+
+    const result = await this.prisma.aderezo.update({
       where: { id },
       data: { stockActual: { increment: cant } },
       include: ADEREZO_INCLUDE,
     });
+
+    await this.prisma.stockMovimiento.create({
+      data: {
+        aderezoId: id,
+        tipo: 'AJUSTE_MANUAL',
+        cantidad: cant,
+        stockAntes,
+        stockDespues: stockAntes + cant,
+        motivo: `Stock manual +${cant}`,
+      },
+    });
+
+    return result;
   }
 
   async descontarStock(id: string, cantidad: number) {
@@ -272,18 +314,50 @@ export class AderezosService {
     if (!Number.isFinite(cant) || cant <= 0)
       throw new BadRequestException('Cantidad inválida');
 
-    const updated = await this.prisma.aderezo.updateMany({
-      where: { id, stockActual: { gte: cant } },
-      data: { stockActual: { decrement: cant } },
+    const aderezo = await this.prisma.aderezo.findUnique({
+      where: { id },
+      select: { stockActual: true, nombre: true, unidadMedida: true },
     });
+    const stockAntes = Number(aderezo?.stockActual ?? 0);
 
-    if (updated.count === 0) {
+    if (stockAntes < cant) {
       throw new BadRequestException('Stock insuficiente');
     }
 
-    return this.prisma.aderezo.findUnique({
+    const result = await this.prisma.aderezo.update({
       where: { id },
+      data: { stockActual: { decrement: cant } },
       include: ADEREZO_INCLUDE,
+    });
+
+    await this.prisma.stockMovimiento.create({
+      data: {
+        aderezoId: id,
+        tipo: 'AJUSTE_MANUAL',
+        cantidad: -cant,
+        stockAntes,
+        stockDespues: stockAntes - cant,
+        motivo: `Stock manual -${cant}`,
+      },
+    });
+
+    return result;
+  }
+
+  async obtenerMovimientos(aderezoId: string, limit = 50) {
+    return this.prisma.stockMovimiento.findMany({
+      where: { aderezoId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  async obtenerMovimientosRecientes(limit = 20) {
+    return this.prisma.stockMovimiento.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      where: { aderezoId: { not: null } },
+      include: { aderezo: { select: { nombre: true } } },
     });
   }
 

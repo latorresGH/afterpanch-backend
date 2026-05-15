@@ -157,6 +157,20 @@ export class ExtrasController {
     return this.extras.descontarStock(id, dto.cantidad);
   }
 
+  @Get(':id/movimientos')
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({ summary: 'Historial de movimientos de stock' })
+  obtenerMovimientos(@Param('id') id: string, @Query('limit') limit?: string) {
+    return this.extras.obtenerMovimientos(id, limit ? parseInt(limit) : 50);
+  }
+
+  @Get('movimientos/recientes')
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({ summary: 'Movimientos recientes de stock' })
+  obtenerMovimientosRecientes(@Query('limit') limit?: string) {
+    return this.extras.obtenerMovimientosRecientes(limit ? parseInt(limit) : 20);
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'Eliminar extra' })
   @Roles(Role.ADMIN)

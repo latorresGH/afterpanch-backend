@@ -20,15 +20,13 @@ const ESTADOS_ABIERTOS: EstadoPedido[] = [
 
 const TRANSICIONES_VALIDAS: Record<EstadoPedido, EstadoPedido[]> = {
   [EstadoPedido.PENDIENTE]: [EstadoPedido.EN_PREPARACION, EstadoPedido.CANCELADO],
-  [EstadoPedido.EN_PREPARACION]: [EstadoPedido.LISTO_PARA_RETIRAR, EstadoPedido.EN_CAMINO, EstadoPedido.CANCELADO],
+  [EstadoPedido.EN_PREPARACION]: [EstadoPedido.LISTO_PARA_RETIRAR, EstadoPedido.CANCELADO],
   [EstadoPedido.LISTO_PARA_RETIRAR]: [EstadoPedido.ENTREGADO, EstadoPedido.CANCELADO],
-  [EstadoPedido.EN_CAMINO]: [EstadoPedido.ENTREGADO, EstadoPedido.PROBLEMA_DIRECCION, EstadoPedido.CANCELADO],
+  [EstadoPedido.EN_CAMINO]: [EstadoPedido.ENTREGADO, EstadoPedido.CANCELADO],
   [EstadoPedido.ENTREGADO]: [],
   [EstadoPedido.CANCELADO]: [],
-  [EstadoPedido.PROBLEMA_DIRECCION]: [EstadoPedido.EN_CAMINO, EstadoPedido.CANCELADO],
+  [EstadoPedido.PROBLEMA_DIRECCION]: [EstadoPedido.EN_PREPARACION, EstadoPedido.CANCELADO],
 };
-
-const LIMITE_EXTRAS_GRATIS = 2;
 
 @Injectable()
 export class PedidosService {
@@ -123,6 +121,11 @@ export class PedidosService {
           activo: true,
           nombre: true,
           categoriaId: true,
+          categoria: {
+            select: {
+              cantExtrasGratis: true,
+            },
+          },
           receta: {
             include: { insumo: { select: { id: true, stockActual: true } } },
           },
@@ -137,6 +140,7 @@ export class PedidosService {
             activo: Boolean(p.activo),
             nombre: p.nombre,
             categoriaId: p.categoriaId,
+            cantExtrasGratis: p.categoria?.cantExtrasGratis ?? 2,
             receta: p.receta,
           },
         ]),
@@ -324,6 +328,7 @@ export class PedidosService {
         const cantidad = Number(d.cantidad);
         const precioUnitario = d.precioUnitario ?? base.precio;
         const categoriaId = base.categoriaId;
+        const limiteExtrasGratis = base.cantExtrasGratis;
 
         const extrasDto = Array.isArray(d.extras) ? d.extras : [];
         const sinExtras = d.sinExtras === true;
@@ -355,7 +360,7 @@ export class PedidosService {
           const { extraId, extra } = expanded[idx];
           const precioExtra = this.getExtraPrecio(extra, categoriaId);
           const esPremium = extra.esPremium === true;
-          const cobrado = esPremium || gratisCount >= LIMITE_EXTRAS_GRATIS;
+          const cobrado = esPremium || gratisCount >= limiteExtrasGratis;
           if (!esPremium) gratisCount++;
           const precioFinal = cobrado ? precioExtra : 0;
           extrasCobradoTotal += precioFinal;

@@ -229,6 +229,12 @@ export class ExtrasService {
       }
     }
 
+    const extraAntes = await this.prisma.extra.findUnique({
+      where: { id },
+      select: { stockActual: true },
+    });
+    const stockAntes = Number(extraAntes?.stockActual ?? 0);
+
     const { categoriaIds, ...rest } = dto;
 
     const data: any = {
@@ -252,6 +258,23 @@ export class ExtrasService {
       data,
       include: EXTRA_INCLUDE,
     });
+
+    if (rest.stockActual !== undefined) {
+      const stockDespues = Number(rest.stockActual);
+      if (stockDespues !== stockAntes) {
+        const diferencia = stockDespues - stockAntes;
+        await this.prisma.stockMovimiento.create({
+          data: {
+            extraId: id,
+            tipo: 'AJUSTE_MANUAL',
+            cantidad: diferencia,
+            stockAntes,
+            stockDespues,
+            motivo: `Stock ajustado de ${stockAntes} a ${stockDespues}`,
+          },
+        });
+      }
+    }
 
     if (categoriaIds !== undefined) {
       await this.prisma.extraCategoria.deleteMany({
@@ -290,25 +313,59 @@ export class ExtrasService {
 
     const extra = await this.prisma.extra.findUnique({
       where: { id },
-      select: { insumoId: true },
+      select: { insumoId: true, stockActual: true, nombre: true, unidadMedida: true },
     });
 
     if (extra?.insumoId) {
+      const insumo = await this.prisma.insumo.findUnique({
+        where: { id: extra.insumoId },
+        select: { stockActual: true, nombre: true },
+      });
+      const stockAntes = Number(insumo?.stockActual ?? 0);
+
       await this.prisma.insumo.update({
         where: { id: extra.insumoId },
         data: { stockActual: { increment: cant } },
       });
+
+      await this.prisma.stockMovimiento.create({
+        data: {
+          insumoId: extra.insumoId,
+          extraId: id,
+          tipo: 'AJUSTE_MANUAL',
+          cantidad: cant,
+          stockAntes,
+          stockDespues: stockAntes + cant,
+          motivo: `Stock manual +${cant}`,
+        },
+      });
+
       return this.prisma.extra.findUnique({
         where: { id },
         include: EXTRA_INCLUDE,
       });
     }
 
-    return this.prisma.extra.update({
+    const stockAntes = Number(extra?.stockActual ?? 0);
+
+    const result = await this.prisma.extra.update({
       where: { id },
       data: { stockActual: { increment: cant } },
       include: EXTRA_INCLUDE,
     });
+
+    await this.prisma.stockMovimiento.create({
+      data: {
+        extraId: id,
+        tipo: 'AJUSTE_MANUAL',
+        cantidad: cant,
+        stockAntes,
+        stockDespues: stockAntes + cant,
+        motivo: `Stock manual +${cant}`,
+      },
+    });
+
+    return result;
   }
 
   async descontarStock(id: string, cantidad: number) {
@@ -319,7 +376,7 @@ export class ExtrasService {
 
     const extra = await this.prisma.extra.findUnique({
       where: { id },
-      select: { insumoId: true, stockActual: true },
+      select: { insumoId: true, stockActual: true, nombre: true, unidadMedida: true },
     });
 
     if (extra?.insumoId) {
@@ -340,18 +397,46 @@ export class ExtrasService {
       });
     }
 
-    const updated = await this.prisma.extra.updateMany({
-      where: { id, stockActual: { gte: cant } },
-      data: { stockActual: { decrement: cant } },
-    });
+    const stockAntes = Number(extra?.stockActual ?? 0);
 
-    if (updated.count === 0) {
+    if (stockAntes < cant) {
       throw new BadRequestException('Stock insuficiente');
     }
 
-    return this.prisma.extra.findUnique({
+    const result = await this.prisma.extra.update({
       where: { id },
+      data: { stockActual: { decrement: cant } },
       include: EXTRA_INCLUDE,
+    });
+
+    await this.prisma.stockMovimiento.create({
+      data: {
+        extraId: id,
+        tipo: 'AJUSTE_MANUAL',
+        cantidad: -cant,
+        stockAntes,
+        stockDespues: stockAntes - cant,
+        motivo: `Stock manual -${cant}`,
+      },
+    });
+
+    return result;
+  }
+
+  async obtenerMovimientos(extraId: string, limit = 50) {
+    return this.prisma.stockMovimiento.findMany({
+      where: { extraId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  async obtenerMovimientosRecientes(limit = 20) {
+    return this.prisma.stockMovimiento.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      where: { extraId: { not: null } },
+      include: { extra: { select: { nombre: true } } },
     });
   }
 

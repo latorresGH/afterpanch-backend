@@ -23,6 +23,7 @@ export class CategoriasService {
         descripcion: dto.descripcion?.trim() ?? null,
         activo: dto.activo ?? true,
         orden,
+        cantExtrasGratis: dto.cantExtrasGratis ?? 2,
       },
     });
   }

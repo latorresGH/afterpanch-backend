@@ -34,7 +34,7 @@ export class NegocioConfigService implements OnModuleInit {
     const defaults = [
       {
         clave: 'alias_transferencia',
-        valor: 'after.panch',
+        valor: 'afterpanch.mp',
         descripcion: 'Alias para recibir transferencias',
       },
       {
@@ -74,6 +74,7 @@ export class NegocioConfigService implements OnModuleInit {
         where: { clave: item.clave },
       });
       if (!existe) {
+        console.log(`[Config] Creando valor por defecto: ${item.clave} = "${item.valor}"`);
         await this.prisma.configuracion.create({ data: item });
       }
     }

@@ -53,8 +53,24 @@ export class OfertasCalculatorService {
       if (!dias.includes(diaSemana)) return false;
 
       if (oferta.horaInicio && oferta.horaFin) {
-        if (horaActual < oferta.horaInicio || horaActual > oferta.horaFin) {
-          return false;
+        const [hInicio, mInicio] = oferta.horaInicio.split(':').map(Number);
+        const [hFin, mFin] = oferta.horaFin.split(':').map(Number);
+        const inicioMin = hInicio * 60 + (mInicio || 0);
+        const finMin = hFin * 60 + (mFin || 0);
+        const actualMin = (() => {
+          const [h, m] = horaActual.split(':').map(Number);
+          return h * 60 + (m || 0);
+        })();
+
+        const cruzaMedianoche = finMin < inicioMin;
+        if (cruzaMedianoche) {
+          if (actualMin < inicioMin && actualMin >= finMin) {
+            return false;
+          }
+        } else {
+          if (actualMin < inicioMin || actualMin > finMin) {
+            return false;
+          }
         }
       }
 

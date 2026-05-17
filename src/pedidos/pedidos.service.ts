@@ -60,7 +60,12 @@ export class PedidosService {
       const horaApertura = horaAp * 60 + (minAp || 0);
       const horaCierre = horaCi * 60 + (minCi || 0);
 
-      if (horaActual < horaApertura || horaActual >= horaCierre) {
+      const cruzaMedianoche = horaCierre < horaApertura;
+      const estaAbierto = cruzaMedianoche
+        ? (horaActual >= horaApertura || horaActual < horaCierre)
+        : (horaActual >= horaApertura && horaActual < horaCierre);
+
+      if (!estaAbierto) {
         throw new BadRequestException(
           `Estamos cerrados. Horario de atención: ${horaAperturaStr} a ${horaCierreStr}`,
         );

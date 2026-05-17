@@ -77,8 +77,11 @@ export class NegocioConfigController {
     console.log('🕐 Hora apertura (minutos):', horaApertura);
     console.log('🕐 Hora cierre (minutos):', horaCierre);
 
-    const abierto = horaActual >= horaApertura && horaActual < horaCierre;
-    console.log('🕐 ¿Abierto?:', abierto, `(${horaActual} >= ${horaApertura} && ${horaActual} < ${horaCierre})`);
+    const cruzaMedianoche = horaCierre < horaApertura;
+    const abierto = cruzaMedianoche
+      ? (horaActual >= horaApertura || horaActual < horaCierre)
+      : (horaActual >= horaApertura && horaActual < horaCierre);
+    console.log('🕐 ¿Abierto?:', abierto, cruzaMedianoche ? '(cruza medianoche)' : `(mismo día)`);
 
     return {
       abierto,

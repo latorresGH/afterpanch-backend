@@ -7,6 +7,7 @@ import {
   Param,
   UseGuards,
   Request,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -59,6 +60,31 @@ export class PedidosController {
   @Roles(Role.ADMIN, Role.TRABAJADOR)
   listarTodos() {
     return this.pedidosService.listarTodos();
+  }
+
+  @Get('demora-actual')
+  @Public()
+  @ApiOperation({ summary: 'Obtener la demora actual calculada' })
+  getDemoraActual() {
+    return this.pedidosService.getDemoraActual();
+  }
+
+  @Post('demora-modo')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({ summary: 'Configurar el modo de demora (AUTO o MANUAL)' })
+  async setDemoraManual(@Body() body: { modo: 'AUTO' | 'MANUAL'; minutos?: number }) {
+    const { modo, minutos } = body;
+    const MINUTOS_VALIDOS = [0, 5, 10, 15, 20, 30, 45, 60];
+    if (modo === 'MANUAL') {
+      if (minutos === undefined || !MINUTOS_VALIDOS.includes(minutos)) {
+        throw new BadRequestException(
+          `minutos debe ser uno de: ${MINUTOS_VALIDOS.join(', ')}`,
+        );
+      }
+    }
+    return this.pedidosService.setDemoraManual({ modo, minutos });
   }
 
   @Get('delivery-pendientes')

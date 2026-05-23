@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { NegocioConfigService } from './config.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -24,30 +24,6 @@ export class NegocioConfigController {
   async obtener(@Param('clave') clave: string) {
     const valor = await this.configService.obtener(clave);
     return { clave, valor };
-  }
-
-  @Post('demora')
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  @Roles(Role.ADMIN, Role.TRABAJADOR)
-  @ApiOperation({ summary: 'Activar/desactivar demora global' })
-  async setDemora(@Body() body: { activa: boolean; minutos: number }) {
-    const { activa, minutos } = body;
-
-    const MINUTOS_VALIDOS = [5, 10, 15, 30, 45, 60];
-    if (activa && !MINUTOS_VALIDOS.includes(minutos)) {
-      throw new BadRequestException(
-        `minutos debe ser uno de: ${MINUTOS_VALIDOS.join(', ')}`,
-      );
-    }
-
-    await this.configService.establecer('demora_activa', String(activa));
-    await this.configService.establecer('demora_minutos', String(activa ? minutos : 0));
-
-    return {
-      demoraActiva: activa,
-      demoraMinutos: activa ? minutos : 0,
-    };
   }
 
   @Post(':clave')

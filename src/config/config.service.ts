@@ -68,14 +68,14 @@ export class NegocioConfigService implements OnModuleInit {
         descripcion: 'Costo base de envío (mostrado como estimado)',
       },
       {
-        clave: 'demora_activa',
-        valor: 'false',
-        descripcion: 'Indica si hay demora activa en el local',
+        clave: 'demora_modo',
+        valor: 'AUTO',
+        descripcion: 'Modo de demora: AUTO (calcula según pedidos activos) o MANUAL (valor fijo)',
       },
       {
-        clave: 'demora_minutos',
+        clave: 'demora_manual_minutos',
         valor: '0',
-        descripcion: 'Minutos de demora adicional al tiempo normal de preparación',
+        descripcion: 'Minutos de demora manual (solo se usa cuando demora_modo=MANUAL)',
       },
     ];
 

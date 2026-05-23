@@ -40,16 +40,13 @@ export class PedidosService {
   ) {}
 
   async crearPedido(dto: CreatePedidoDto) {
-    const [horaAperturaStr, horaCierreStr, demoraActivaStr, demoraMinutosStr] =
-      await Promise.all([
-        this.configService.obtener('hora_apertura'),
-        this.configService.obtener('hora_cierre'),
-        this.configService.obtener('demora_activa'),
-        this.configService.obtener('demora_minutos'),
-      ]);
+    const [horaAperturaStr, horaCierreStr] = await Promise.all([
+      this.configService.obtener('hora_apertura'),
+      this.configService.obtener('hora_cierre'),
+    ]);
 
-    const demoraActiva = demoraActivaStr === 'true';
-    const demoraSnapshot = demoraActiva ? parseInt(demoraMinutosStr || '0', 10) : null;
+    const demoraResult = await this.getDemoraActual();
+    const demoraSnapshot = demoraResult.minutos;
 
     if (horaAperturaStr && horaCierreStr) {
       const ahora = new Date();
@@ -790,6 +787,36 @@ export class PedidosService {
         });
       }
     }
+  }
+
+  async getDemoraActual(): Promise<{ modo: 'AUTO' | 'MANUAL'; minutos: number; pedidosActivos: number }> {
+    const modo = (await this.configService.obtener('demora_modo')) ?? 'AUTO';
+
+    const pedidosActivos = await this.prisma.pedido.count({
+      where: { estado: { in: [EstadoPedido.PENDIENTE, EstadoPedido.EN_PREPARACION] } },
+    });
+
+    if (modo === 'MANUAL') {
+      const raw = await this.configService.obtener('demora_manual_minutos');
+      const minutos = parseInt(raw ?? '0', 10);
+      return { modo: 'MANUAL', minutos, pedidosActivos };
+    }
+
+    let minutos = 0;
+    if (pedidosActivos >= 13) minutos = 50;
+    else if (pedidosActivos >= 9) minutos = 35;
+    else if (pedidosActivos >= 5) minutos = 20;
+
+    return { modo: 'AUTO', minutos, pedidosActivos };
+  }
+
+  async setDemoraManual(dto: { modo: 'AUTO' | 'MANUAL'; minutos?: number }): Promise<{ modo: 'AUTO' | 'MANUAL'; minutos: number; pedidosActivos: number }> {
+    await this.configService.establecer('demora_modo', dto.modo);
+    await this.configService.establecer(
+      'demora_manual_minutos',
+      String(dto.modo === 'MANUAL' ? (dto.minutos ?? 0) : 0),
+    );
+    return this.getDemoraActual();
   }
 
   async listarTodos() {

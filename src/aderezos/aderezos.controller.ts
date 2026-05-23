@@ -100,6 +100,17 @@ export class AderezosController {
     return this.aderezosService.findByCategoriaProducto(categoriaId);
   }
 
+  @Get('por-categoria-con-stock/:categoriaId')
+  @Public()
+  @ApiOperation({
+    summary: 'Obtener aderezos disponibles con stock suficiente para una categoría',
+    description:
+      'Retorna aderezos filtrando por categoría y verificando que el stock sea suficiente según el consumo configurado para esa categoría.',
+  })
+  findByCategoriaProductoConStock(@Param('categoriaId') categoriaId: string) {
+    return this.aderezosService.findByCategoriaProductoConStock(categoriaId);
+  }
+
   @Get(':id')
   @Roles(Role.ADMIN, Role.TRABAJADOR)
   @ApiOperation({ summary: 'Obtener aderezo por ID' })

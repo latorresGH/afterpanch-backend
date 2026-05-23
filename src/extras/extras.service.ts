@@ -113,6 +113,33 @@ export class ExtrasService {
     });
   }
 
+  async findByCategoriaProductoConStock(categoriaProductoId: string) {
+    const extras = await this.prisma.extra.findMany({
+      where: {
+        activo: true,
+        OR: [
+          { esGlobal: true },
+          {
+            categoriasAplica: {
+              some: { categoriaId: categoriaProductoId },
+            },
+          },
+        ],
+      },
+      include: EXTRA_INCLUDE,
+      orderBy: { nombre: 'asc' },
+    });
+
+    // Filtrar extras que tengan stock suficiente para la categoría del producto
+    return extras.filter((extra) => {
+      const consumo = extra.consumosPorCategoria?.find(
+        (c) => c.categoriaId === categoriaProductoId,
+      );
+      const cantidadConsumo = consumo?.cantidadConsumo ?? 1;
+      return extra.stockActual >= cantidadConsumo;
+    });
+  }
+
   async findOne(id: string) {
     const e = await this.prisma.extra.findUnique({
       where: { id },

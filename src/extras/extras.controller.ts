@@ -105,6 +105,17 @@ export class ExtrasController {
     return this.extras.findByCategoriaProducto(categoriaId);
   }
 
+  @Get('por-categoria-con-stock/:categoriaId')
+  @Public()
+  @ApiOperation({
+    summary: 'Obtener extras disponibles con stock suficiente para una categoría',
+    description:
+      'Retorna extras filtrando por categoría y verificando que el stock sea suficiente según el consumo configurado para esa categoría.',
+  })
+  findByCategoriaProductoConStock(@Param('categoriaId') categoriaId: string) {
+    return this.extras.findByCategoriaProductoConStock(categoriaId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Obtener extra por ID' })
   findOne(@Param('id') id: string) {

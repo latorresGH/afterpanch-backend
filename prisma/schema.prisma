@@ -212,6 +212,8 @@ model Pedido {
   repartidorId String?
   repartidor   User?         @relation("RepartidorPedidos", fields: [repartidorId], references: [id])
 
+  demoraMinutosSnapshot Int?
+
   detalles         PedidoDetalle[]
   ofertasAplicadas PedidoOferta[]
   movimientosCaja  CajaMovimiento[]

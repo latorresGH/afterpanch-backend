@@ -91,6 +91,33 @@ export class AderezosService {
     });
   }
 
+  async findByCategoriaProductoConStock(categoriaProductoId: string) {
+    const aderezos = await this.prisma.aderezo.findMany({
+      where: {
+        activo: true,
+        OR: [
+          { esGlobal: true },
+          {
+            categoriasAplica: {
+              some: { categoriaId: categoriaProductoId },
+            },
+          },
+        ],
+      },
+      include: ADEREZO_INCLUDE,
+      orderBy: { nombre: 'asc' },
+    });
+
+    // Filtrar aderezos que tengan stock suficiente para la categoría del producto
+    return aderezos.filter((aderezo) => {
+      const consumo = aderezo.consumosPorCategoria?.find(
+        (c) => c.categoriaId === categoriaProductoId,
+      );
+      const cantidadConsumo = consumo?.cantidadConsumo ?? 1;
+      return aderezo.stockActual >= cantidadConsumo;
+    });
+  }
+
   async findOne(id: string) {
     const aderezo = await this.prisma.aderezo.findUnique({
       where: { id },

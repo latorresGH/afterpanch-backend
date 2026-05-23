@@ -40,8 +40,16 @@ export class PedidosService {
   ) {}
 
   async crearPedido(dto: CreatePedidoDto) {
-    const horaAperturaStr = await this.configService.obtener('hora_apertura');
-    const horaCierreStr = await this.configService.obtener('hora_cierre');
+    const [horaAperturaStr, horaCierreStr, demoraActivaStr, demoraMinutosStr] =
+      await Promise.all([
+        this.configService.obtener('hora_apertura'),
+        this.configService.obtener('hora_cierre'),
+        this.configService.obtener('demora_activa'),
+        this.configService.obtener('demora_minutos'),
+      ]);
+
+    const demoraActiva = demoraActivaStr === 'true';
+    const demoraSnapshot = demoraActiva ? parseInt(demoraMinutosStr || '0', 10) : null;
 
     if (horaAperturaStr && horaCierreStr) {
       const ahora = new Date();
@@ -263,6 +271,9 @@ export class PedidosService {
               throw new BadRequestException(`Extra inactivo: ${e.extraId}`);
             const cantidadExtra = e.cantidad ?? 1;
 
+            const cantidadConsumo = this.getExtraConsumo(extra, prod.categoriaId);
+            const cantidadTotal = cantidadConsumo * cantidadExtra;
+
             const stockDisponible = extra.insumoId
               ? ((
                   await tx.insumo.findUnique({
@@ -272,9 +283,9 @@ export class PedidosService {
                 )?.stockActual ?? 0)
               : extra.stockActual;
 
-            if (stockDisponible < cantidadExtra) {
+            if (stockDisponible < cantidadTotal) {
               throw new BadRequestException(
-                `Stock insuficiente para extra ${extra.nombre}. Disponible: ${stockDisponible}`,
+                `Stock insuficiente para extra ${extra.nombre}. Disponible: ${stockDisponible}, Necesario: ${cantidadTotal}`,
               );
             }
           }
@@ -283,9 +294,11 @@ export class PedidosService {
         const cantidadAderezos = d.aderezosIds?.length || 0;
         for (const adeId of d.aderezosIds || []) {
           const ade = aderezoMap.get(adeId);
-          if (ade && ade.stockActual < cantidad) {
+          const cantidadConsumo = this.getAderezoConsumo(ade, prod.categoriaId);
+          const cantidadTotal = cantidadConsumo * cantidad;
+          if (ade && ade.stockActual < cantidadTotal) {
             throw new BadRequestException(
-              `Stock insuficiente de aderezo ${ade.nombre}. Disponible: ${ade.stockActual}, Necesario: ${cantidad}`,
+              `Stock insuficiente de aderezo ${ade.nombre}. Disponible: ${ade.stockActual}, Necesario: ${cantidadTotal}`,
             );
           }
         }
@@ -510,6 +523,7 @@ export class PedidosService {
             repartidorId: dto.repartidorId ?? null,
             total: totalConOfertas,
             estado: EstadoPedido.PENDIENTE,
+            demoraMinutosSnapshot: demoraSnapshot,
             detalles: { create: detallesCreate },
           },
           include: includeConfig,
@@ -814,7 +828,16 @@ export class PedidosService {
       include: {
         detalles: {
           include: {
-            producto: { include: { categoria: true } },
+            producto: {
+              select: {
+                id: true,
+                nombre: true,
+                precio: true,
+                tiempoPreparacionMin: true,
+                categoriaId: true,
+                categoria: true,
+              },
+            },
             aderezos: true,
           },
         },

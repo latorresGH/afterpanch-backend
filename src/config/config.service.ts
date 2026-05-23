@@ -67,6 +67,16 @@ export class NegocioConfigService implements OnModuleInit {
         valor: '3000',
         descripcion: 'Costo base de envío (mostrado como estimado)',
       },
+      {
+        clave: 'demora_activa',
+        valor: 'false',
+        descripcion: 'Indica si hay demora activa en el local',
+      },
+      {
+        clave: 'demora_minutos',
+        valor: '0',
+        descripcion: 'Minutos de demora adicional al tiempo normal de preparación',
+      },
     ];
 
     for (const item of defaults) {

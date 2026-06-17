@@ -78,6 +78,25 @@ export class CajaController {
     return this.cajaService.obtenerResumenCaja(inicio, fin);
   }
 
+  @Get('historial')
+  @ApiOperation({
+    summary: 'Historial de movimientos paginado',
+    description:
+      'Devuelve movimientos de caja paginados. Exclusivo para el panel admin. No afecta /caja/resumen.',
+  })
+  getHistorial(
+    @Query('pagina') pagina?: string,
+    @Query('limit') limit?: string,
+    @Query('fechaInicio') fechaInicio?: string,
+    @Query('fechaFin') fechaFin?: string,
+  ) {
+    const p = Math.max(1, parseInt(pagina ?? '1', 10) || 1);
+    const l = Math.min(100, Math.max(1, parseInt(limit ?? '20', 10) || 20));
+    const inicio = fechaInicio ? new Date(fechaInicio) : undefined;
+    const fin = fechaFin ? new Date(fechaFin) : undefined;
+    return this.cajaService.getHistorialPaginado(p, l, inicio, fin);
+  }
+
   @Get('pedido/:pedidoId')
   @ApiOperation({ summary: 'Obtener movimientos de un pedido específico' })
   obtenerMovimientosPorPedido(@Param('pedidoId') pedidoId: string) {

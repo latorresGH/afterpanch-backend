@@ -89,9 +89,8 @@ export class CajaService {
     });
   }
 
-  async obtenerResumenCaja(fechaInicio?: Date, fechaFin?: Date) {
+  private buildFechaWhere(fechaInicio?: Date, fechaFin?: Date) {
     const where: any = {};
-
     if (fechaInicio || fechaFin) {
       where.fechaConfirmacion = {};
       if (fechaInicio) {
@@ -105,7 +104,11 @@ export class CajaService {
         where.fechaConfirmacion.lte = fin;
       }
     }
+    return where;
+  }
 
+  async obtenerResumenCaja(fechaInicio?: Date, fechaFin?: Date) {
+    const where = this.buildFechaWhere(fechaInicio, fechaFin);
     const movimientos = await this.prisma.cajaMovimiento.findMany({
       where,
       include: {
@@ -144,6 +147,45 @@ export class CajaService {
     return {
       resumen,
       movimientos,
+    };
+  }
+
+  async getHistorialPaginado(
+    pagina: number,
+    limit: number,
+    fechaInicio?: Date,
+    fechaFin?: Date,
+  ) {
+    const where = this.buildFechaWhere(fechaInicio, fechaFin);
+    const skip = (pagina - 1) * limit;
+
+    const [movimientos, total] = await Promise.all([
+      this.prisma.cajaMovimiento.findMany({
+        where,
+        include: {
+          pedido: {
+            select: {
+              id: true,
+              nombreCliente: true,
+              apellidoCliente: true,
+              total: true,
+              estado: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.cajaMovimiento.count({ where }),
+    ]);
+
+    return {
+      movimientos,
+      total,
+      pagina,
+      totalPaginas: Math.ceil(total / limit),
+      limit,
     };
   }
 

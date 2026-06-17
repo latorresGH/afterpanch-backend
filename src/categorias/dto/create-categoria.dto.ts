@@ -20,4 +20,8 @@ export class CreateCategoriaDto {
   @IsInt()
   @Min(0)
   cantExtrasGratis?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  sinExtrasNiAderezos?: boolean;
 }

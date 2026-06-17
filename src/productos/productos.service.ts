@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { EstadoPedido } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
@@ -182,6 +183,40 @@ if (!cat) throw new BadRequestException('Categoría inválida');
     await this.prisma.productoReceta.deleteMany({ where: { productoId: id } });
 
     return this.prisma.producto.delete({ where: { id } });
+  }
+
+  async getStats(productoId: string, fechaInicio: string, fechaFin: string) {
+    const producto = await this.prisma.producto.findUnique({
+      where: { id: productoId },
+      select: { id: true, nombre: true },
+    });
+    if (!producto) throw new NotFoundException('Producto no encontrado');
+
+    const inicio = new Date(`${fechaInicio}T00:00:00`);
+    const fin = new Date(`${fechaFin}T23:59:59.999`);
+
+    const resultado = await this.prisma.pedidoDetalle.aggregate({
+      where: {
+        productoId,
+        pedido: {
+          estado: EstadoPedido.ENTREGADO,
+          createdAt: { gte: inicio, lte: fin },
+        },
+      },
+      _sum: {
+        cantidad: true,
+        subtotal: true,
+      },
+    });
+
+    return {
+      productoId,
+      nombre: producto.nombre,
+      cantidadVendida: resultado._sum.cantidad ?? 0,
+      totalRecaudado: resultado._sum.subtotal ?? 0,
+      fechaInicio,
+      fechaFin,
+    };
   }
 
   private async ensureExists(id: string) {

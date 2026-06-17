@@ -19,6 +19,7 @@ import { ProductosService } from './productos.service';
 import { UpdateProductoDto } from './dto/update-producto.dto';
 import { ToggleActivoDto } from './dto/toggle-activo.dto';
 import { CreateProductoDto } from './dto/create-producto.dto';
+import { StatsProductoQueryDto } from './dto/stats-producto-query.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
@@ -57,6 +58,17 @@ export class ProductosController {
   @ApiOperation({ summary: 'Obtener producto por ID' })
   findOne(@Param('id') id: string) {
     return this.productosService.findOne(id);
+  }
+
+  @Get(':id/stats')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Estadísticas de ventas de un producto',
+    description:
+      'Devuelve cantidad vendida y total recaudado para un producto en un rango de fechas. Solo incluye pedidos ENTREGADO.',
+  })
+  getStats(@Param('id') id: string, @Query() query: StatsProductoQueryDto) {
+    return this.productosService.getStats(id, query.fechaInicio, query.fechaFin);
   }
 
   @Patch(':id')

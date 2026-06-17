@@ -98,7 +98,8 @@ model Categoria {
   descripcion String?
   activo      Boolean  @default(true)
   orden       Int      @default(0)
-  cantExtrasGratis Int @default(2)
+  cantExtrasGratis    Int     @default(2)
+  sinExtrasNiAderezos Boolean @default(false)
   productos        Producto[]
   preciosAderezos  AderezoPrecio[]
   preciosExtras    ExtraPrecio[]

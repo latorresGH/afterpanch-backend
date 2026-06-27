@@ -39,7 +39,10 @@ export class PedidosService {
     private pedidosGateway: PedidosGateway,
   ) {}
 
-  async crearPedido(dto: CreatePedidoDto) {
+  async crearPedido(
+    dto: CreatePedidoDto,
+    actor?: { sub?: string; role?: Role; email?: string } | null,
+  ) {
     const [horaAperturaStr, horaCierreStr] = await Promise.all([
       this.configService.obtener('hora_apertura'),
       this.configService.obtener('hora_cierre'),
@@ -102,6 +105,19 @@ export class PedidosService {
 
     if (!detalles || detalles.length === 0) {
       throw new BadRequestException('El pedido no tiene productos');
+    }
+
+    // SEGURIDAD (costoEnvio): el cliente anónimo NO puede influir en el costo de envío.
+    // - Empleado autenticado (ADMIN/TRABAJADOR vía JWT): se respeta el costoEnvio manual del body.
+    // - Cualquier otro caso (menú público anónimo): se ignora el body y se usa el valor
+    //   server-side `delivery_precio_base` de config. Es solo un placeholder; el empleado
+    //   ajusta el costo real luego con setCostoEnvio/asignarRepartidor.
+    const esEmpleado =
+      actor?.role === Role.ADMIN || actor?.role === Role.TRABAJADOR;
+    let costoEnvioPublico = 0;
+    if (!esEmpleado && tipo === TipoPedidoDto.DELIVERY) {
+      const base = Number(await this.configService.obtener('delivery_precio_base'));
+      costoEnvioPublico = Number.isFinite(base) && base >= 0 ? base : 0;
     }
 
     if (tipo === TipoPedidoDto.DELIVERY && (!direccion || !direccion.trim())) {
@@ -341,7 +357,9 @@ export class PedidosService {
       for (const d of detalles as any[]) {
         const base = prodMap.get(d.productoId)!;
         const cantidad = Number(d.cantidad);
-        const precioUnitario = d.precioUnitario ?? base.precio;
+        // SEGURIDAD: el precio SIEMPRE sale del producto en la DB, nunca del cliente.
+        // `d.precioUnitario` del DTO se ignora deliberadamente para evitar manipulación de precios.
+        const precioUnitario = base.precio;
         const categoriaId = base.categoriaId;
         const limiteExtrasGratis = base.cantExtrasGratis;
 
@@ -421,7 +439,8 @@ export class PedidosService {
       const lineasParaCalcular = detalles.map((d: any) => ({
         productoId: d.productoId,
         cantidad: d.cantidad,
-        precioUnitario: d.precioUnitario ?? prodMap.get(d.productoId)!.precio,
+        // SEGURIDAD: precio real de la DB, nunca el del cliente (ver nota arriba).
+        precioUnitario: prodMap.get(d.productoId)!.precio,
         extras: (d.extras || []).map((e: any) => ({
           extraId: e.extraId,
           cantidad: e.cantidad ?? 1,
@@ -482,7 +501,8 @@ export class PedidosService {
             ...(!pedido.metodoPago && metodoPago
               ? { metodoPago: metodoPago as MetodoPago }
               : {}),
-            ...(costoEnvio !== undefined ? { costoEnvio } : {}),
+            // Agregar items a un pedido existente: solo un empleado puede tocar el costoEnvio.
+            ...(esEmpleado && costoEnvio !== undefined ? { costoEnvio } : {}),
             ...(direccionLat !== undefined ? { direccionLat } : {}),
             ...(direccionLng !== undefined ? { direccionLng } : {}),
             ...(direccionFormateada !== undefined ? { direccionFormateada } : {}),
@@ -506,7 +526,7 @@ export class PedidosService {
             metodoPago: (metodoPago as MetodoPago) ?? null,
             numeroCliente: numeroClienteLimpio,
             direccion: tipo === TipoPedidoDto.DELIVERY ? direccion!.trim() : null,
-            costoEnvio: costoEnvio ?? 0,
+            costoEnvio: esEmpleado ? (costoEnvio ?? 0) : costoEnvioPublico,
             direccionLat: direccionLat ?? null,
             direccionLng: direccionLng ?? null,
             direccionFormateada: direccionFormateada ?? null,

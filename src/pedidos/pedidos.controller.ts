@@ -22,6 +22,7 @@ import { CambiarEstadoDto } from './dto/cambiar-estado.dto';
 import { CreatePedidoDto } from './dto/create-pedido.dto';
 import { SetMetodoPagoDto } from './dto/set-metodo-pago.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { Roles, ROLES_KEY } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
 import { Public } from '../auth/public.decorator';
@@ -34,11 +35,13 @@ export class PedidosController {
 
   @Post()
   @Public()
+  @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({
     summary: 'Crear un nuevo pedido',
     description:
-      'Crea un pedido con productos, extras y aderezos. Descuenta automáticamente el stock de insumos y extras.',
+      'Crea un pedido con productos, extras y aderezos. Descuenta automáticamente el stock de insumos y extras. ' +
+      'Accesible sin autenticación (menú público); si llega un JWT de ADMIN/TRABAJADOR se respeta el costoEnvio manual.',
   })
   @ApiResponse({ status: 201, description: 'Pedido creado exitosamente' })
   @ApiResponse({
@@ -47,8 +50,11 @@ export class PedidosController {
   })
   @ApiResponse({ status: 429, description: 'Demasiadas solicitudes' })
   crear(@Body() dto: CreatePedidoDto, @Request() req: any) {
-    console.log(`[PEDIDOS] Pedido creado desde menú público`);
-    return this.pedidosService.crearPedido(dto);
+    const actor = req.user ?? null;
+    console.log(
+      `[PEDIDOS] Pedido creado ${actor ? `por ${actor.role} (${actor.email})` : 'desde menú público (anónimo)'}`,
+    );
+    return this.pedidosService.crearPedido(dto, actor);
   }
 
   @Get()

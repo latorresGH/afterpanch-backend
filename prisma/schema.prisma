@@ -236,9 +236,15 @@ model PedidoDetalle {
   subtotal Float
   notas String?
 
+  comboId String?          // Id de la oferta-combo (snapshot, sin FK)
+  comboInstanciaId String? // Agrupa las líneas de UN combo dentro del pedido
+  comboNombre String?      // Nombre del combo stampeado al crear (snapshot, no depende de FK)
+
   pedido Pedido @relation(fields: [pedidoId], references: [id])
   producto Producto @relation(fields: [productoId], references: [id])
   ofertaAplicada PedidoOferta[]
+
+  @@index([comboInstanciaId])
 }
 
 // --- GESTIÓN DE EXTRAS ---
@@ -370,6 +376,10 @@ model Oferta {
   porcentajeDescuento Float?
   montoDescuento      Float?
 
+  precio              Float?          // Precio fijo del combo
+  imagenUrl           String?         // Foto del combo
+  orden               Int             @default(0) // Orden de aparición en el menú
+
   maxUsosPorCliente   Int?
   maxUsosTotales      Int?
   usosActuales        Int             @default(0)
@@ -399,6 +409,7 @@ model OfertaProducto {
   cantidadMin   Int       @default(1)
   cantidadMax   Int?
   precioEspecial Float?
+  orden         Int       @default(0) // Orden de los modales (qué producto se arma primero)
 
   oferta        Oferta    @relation(fields: [ofertaId], references: [id], onDelete: Cascade)
   producto      Producto  @relation(fields: [productoId], references: [id])
@@ -406,6 +417,8 @@ model OfertaProducto {
   @@unique([ofertaId, productoId])
 }
 
+// DEPRECADO — reemplazado por OfertaProducto ordenado (lista fija). No usar en código nuevo.
+// Se mantiene en el schema para preservar las tablas existentes (evitar DROP TABLE).
 model GrupoCombo {
   id            String        @id @default(uuid())
   ofertaId      String
@@ -417,6 +430,7 @@ model GrupoCombo {
   opciones      GrupoOpcion[]
 }
 
+// DEPRECADO — ver nota en GrupoCombo. No usar en código nuevo.
 model GrupoOpcion {
   id            String      @id @default(uuid())
   grupoComboId  String

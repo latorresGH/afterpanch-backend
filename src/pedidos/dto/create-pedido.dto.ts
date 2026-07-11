@@ -86,6 +86,25 @@ export class PedidoDetalleDto {
   @IsOptional()
   @IsBoolean()
   sinExtras?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Id de la oferta-combo a la que pertenece esta línea. Si está presente, el precio ' +
+      'del combo lo fija el servidor (oferta.precio en la 1ra línea, $0 en las siguientes).',
+  })
+  @IsOptional()
+  @IsString()
+  comboId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Id de instancia del combo generado en el cliente. Agrupa las líneas de UNA ' +
+      'instancia del combo (permite agregar el mismo combo N veces). Si no viene, el ' +
+      'servidor agrupa por comboId y genera uno. El precio NUNCA depende de este valor.',
+  })
+  @IsOptional()
+  @IsString()
+  comboInstanciaId?: string;
 }
 
 export class CreatePedidoDto {

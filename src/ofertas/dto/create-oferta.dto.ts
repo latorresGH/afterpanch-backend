@@ -56,6 +56,11 @@ export class OfertaProductoDto {
   @IsNumber()
   @IsOptional()
   precioEspecial?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  orden?: number;
 }
 
 export class CreateOfertaDto {
@@ -94,6 +99,20 @@ export class CreateOfertaDto {
   @Min(0)
   @IsOptional()
   montoDescuento?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  precio?: number; // Precio fijo del combo (obligatorio si tipo === 'COMBO', validado en el service)
+
+  @IsString()
+  @IsOptional()
+  imagenUrl?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  orden?: number;
 
   @IsNumber()
   @IsOptional()

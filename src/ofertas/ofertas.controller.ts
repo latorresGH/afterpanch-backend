@@ -36,6 +36,13 @@ export class OfertasController {
     return this.ofertasService.findAll(activas === 'true');
   }
 
+  // IMPORTANTE: declarar antes de @Get(':id') para que no lo capture la ruta con parámetro.
+  @Get('combos')
+  @Public()
+  listarCombos() {
+    return this.ofertasService.findCombos();
+  }
+
   @Get(':id')
   @Roles(Role.ADMIN, Role.TRABAJADOR)
   findOne(@Param('id') id: string) {

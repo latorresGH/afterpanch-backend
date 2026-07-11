@@ -147,7 +147,10 @@ export class OfertasCalculatorService {
       case 'DOS_POR_UNO':
         return this.evaluar2x1(oferta, lineas, productosMap);
       case 'COMBO':
-        return this.evaluarCombo(oferta, lineas, productosMap);
+        // DESACTIVADO: los combos ahora son ítems explícitos del carrito —
+        // se procesan en crearPedido (precio fijo del server), no como descuento automático.
+        // Se evita así el doble descuento. (El método evaluarCombo queda como referencia.)
+        return null;
       case 'DESCUENTO_PORCENTAJE':
         return this.evaluarDescuentoPorcentaje(oferta, lineas, subtotal);
       case 'DESCUENTO_MONTO_FIJO':

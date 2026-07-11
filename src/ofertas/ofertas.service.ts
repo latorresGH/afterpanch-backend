@@ -33,11 +33,19 @@ export class OfertasService {
       );
     }
 
-    if (
-      dto.tipo === TipoOferta.COMBO &&
-      (!dto.gruposCombo || dto.gruposCombo.length === 0)
-    ) {
-      throw new BadRequestException('gruposCombo es requerido para COMBO');
+    // Combos (modelo nuevo B1): lista fija de productos ordenada + precio fijo.
+    // GrupoCombo quedó deprecado; ya no se exige.
+    if (dto.tipo === TipoOferta.COMBO) {
+      if (dto.precio === undefined || dto.precio === null || dto.precio <= 0) {
+        throw new BadRequestException(
+          'precio (precio fijo del combo) es requerido y debe ser mayor a 0 para COMBO',
+        );
+      }
+      if (!dto.productos || dto.productos.length === 0) {
+        throw new BadRequestException(
+          'productos (lista de productos del combo) es requerido para COMBO',
+        );
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -52,6 +60,9 @@ export class OfertasService {
           activa: dto.activa ?? true,
           porcentajeDescuento: dto.porcentajeDescuento ?? null,
           montoDescuento: dto.montoDescuento ?? null,
+          precio: dto.precio ?? null,
+          imagenUrl: dto.imagenUrl?.trim() || null,
+          orden: dto.orden ?? 0,
           maxUsosPorCliente: dto.maxUsosPorCliente ?? null,
           maxUsosTotales: dto.maxUsosTotales ?? null,
           diasAplicables: dto.diasAplicables || '1,2,3,4,5,6,7',
@@ -70,6 +81,7 @@ export class OfertasService {
             cantidadMin: p.cantidadMin ?? 1,
             cantidadMax: p.cantidadMax ?? null,
             precioEspecial: p.precioEspecial ?? null,
+            orden: p.orden ?? 0,
           })),
         });
       }
@@ -117,6 +129,49 @@ export class OfertasService {
     });
   }
 
+  // Endpoint público del menú: combos activos con su lista fija de productos ordenada.
+  // NOTA: la categoría expone `cantExtrasGratis` (límite real de extras gratis del proyecto;
+  // no existe un campo `maxAderezosGratis` — los aderezos son gratis sin límite).
+  async findCombos() {
+    return this.prisma.oferta.findMany({
+      where: {
+        tipo: TipoOferta.COMBO,
+        activa: true,
+      },
+      select: {
+        id: true,
+        nombre: true,
+        descripcion: true,
+        precio: true,
+        imagenUrl: true,
+        orden: true,
+        productos: {
+          orderBy: { orden: 'asc' },
+          select: {
+            orden: true,
+            producto: {
+              select: {
+                id: true,
+                nombre: true,
+                precio: true,
+                imagenUrl: true,
+                categoria: {
+                  select: {
+                    id: true,
+                    nombre: true,
+                    sinExtrasNiAderezos: true,
+                    cantExtrasGratis: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { orden: 'asc' },
+    });
+  }
+
   async findOne(id: string) {
     const oferta = await this.prisma.oferta.findUnique({
       where: { id },
@@ -148,6 +203,9 @@ export class OfertasService {
           activa: dto.activa,
           porcentajeDescuento: dto.porcentajeDescuento,
           montoDescuento: dto.montoDescuento,
+          precio: dto.precio,
+          imagenUrl: dto.imagenUrl,
+          orden: dto.orden,
           maxUsosPorCliente: dto.maxUsosPorCliente,
           maxUsosTotales: dto.maxUsosTotales,
           diasAplicables: dto.diasAplicables,

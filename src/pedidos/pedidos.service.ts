@@ -4,9 +4,16 @@ import {
   NotFoundException,
   Logger,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreatePedidoDto, TipoPedidoDto } from './dto/create-pedido.dto';
-import { EstadoPedido, Prisma, Role, MetodoPago } from '@prisma/client';
+import {
+  EstadoPedido,
+  Prisma,
+  Role,
+  MetodoPago,
+  TipoOferta,
+} from '@prisma/client';
 import { OfertasCalculatorService } from '../ofertas/ofertas-calculator.service';
 import { NegocioConfigService } from '../config/config.service';
 import { PedidosGateway } from './pedidos.gateway';
@@ -178,6 +185,141 @@ export class PedidosService {
         if (prodMap.get(pid)!.activo === false)
           throw new BadRequestException(`Producto inactivo: ${pid}`);
       }
+
+      // --- COMBOS ---
+      // Cada línea con `comboId` pertenece a una oferta-combo. El precio SIEMPRE lo fija
+      // el servidor (oferta.precio), nunca el cliente.
+      // Las líneas se agrupan en "instancias": el cliente puede mandar `comboInstanciaId`
+      // (permite el mismo combo N veces); si no viene, se agrupa por comboId. El precio
+      // NUNCA depende del valor del cliente.
+      const comboIdsUnicos = Array.from(
+        new Set(
+          (detalles as any[])
+            .map((d) => d.comboId)
+            .filter((id): id is string => !!id),
+        ),
+      );
+
+      // Definición de cada combo: nombre + precio fijo + composición esperada (productoId -> cantidad).
+      const comboMap = new Map<
+        string,
+        { nombre: string; precio: number; esperado: Map<string, number> }
+      >();
+      // Clave de instancia -> id de instancia persistido (valor del cliente o uuid del server).
+      const instanciaStoredId = new Map<string, string>();
+      const hayCombos = comboIdsUnicos.length > 0;
+
+      // Clave de agrupación de una línea de combo: usa el comboInstanciaId del cliente si
+      // vino; si no, agrupa todas las líneas del mismo comboId bajo una sola instancia.
+      const claveInstancia = (d: any): string =>
+        d.comboInstanciaId ? `c:${d.comboInstanciaId}` : `g:${d.comboId}`;
+
+      if (hayCombos) {
+        const combosDb = await tx.oferta.findMany({
+          where: { id: { in: comboIdsUnicos } },
+          select: {
+            id: true,
+            nombre: true,
+            tipo: true,
+            activa: true,
+            precio: true,
+            productos: { select: { productoId: true, cantidadMin: true } },
+          },
+        });
+        const combosDbMap = new Map(combosDb.map((c) => [c.id, c]));
+
+        for (const comboId of comboIdsUnicos) {
+          const combo = combosDbMap.get(comboId);
+          if (!combo) {
+            throw new BadRequestException(`Combo no encontrado: ${comboId}`);
+          }
+          if (combo.tipo !== TipoOferta.COMBO) {
+            throw new BadRequestException(`La oferta ${comboId} no es un combo`);
+          }
+          if (!combo.activa) {
+            throw new BadRequestException(`El combo ${comboId} no está activo`);
+          }
+          if (combo.precio === null || combo.precio === undefined) {
+            throw new BadRequestException(
+              `El combo ${comboId} no tiene precio configurado`,
+            );
+          }
+
+          const esperado = new Map<string, number>();
+          for (const p of combo.productos) {
+            esperado.set(p.productoId, p.cantidadMin ?? 1);
+          }
+          comboMap.set(comboId, {
+            nombre: combo.nombre,
+            precio: Number(combo.precio),
+            esperado,
+          });
+        }
+
+        // SEGURIDAD 1 (pertenencia): cada línea marcada con un comboId debe ser un
+        // producto de la definición de ese combo. Evita colar un producto caro a $0.
+        for (const d of detalles as any[]) {
+          if (!d.comboId) continue;
+          if (!comboMap.get(d.comboId)!.esperado.has(d.productoId)) {
+            throw new BadRequestException(
+              `El producto ${d.productoId} no pertenece al combo ${d.comboId}`,
+            );
+          }
+        }
+
+        // Agrupa las líneas de combo por instancia.
+        const gruposInstancia = new Map<
+          string,
+          { comboId: string; comboInstanciaId?: string; cantidades: Map<string, number> }
+        >();
+        for (const d of detalles as any[]) {
+          if (!d.comboId) continue;
+          const key = claveInstancia(d);
+          let grupo = gruposInstancia.get(key);
+          if (!grupo) {
+            grupo = {
+              comboId: d.comboId,
+              comboInstanciaId: d.comboInstanciaId,
+              cantidades: new Map(),
+            };
+            gruposInstancia.set(key, grupo);
+          }
+          // Todas las líneas de una instancia deben compartir el mismo comboId.
+          if (grupo.comboId !== d.comboId) {
+            throw new BadRequestException(
+              `La instancia de combo ${key} mezcla combos distintos`,
+            );
+          }
+          grupo.cantidades.set(
+            d.productoId,
+            (grupo.cantidades.get(d.productoId) ?? 0) + Number(d.cantidad),
+          );
+        }
+
+        // SEGURIDAD 2 (composición): cada instancia debe contener EXACTAMENTE los
+        // productos definidos del combo con sus cantidades. Evita fusionar N combos
+        // en una instancia para pagar uno solo, o agregar unidades extra a $0.
+        for (const [key, grupo] of gruposInstancia) {
+          const esperado = comboMap.get(grupo.comboId)!.esperado;
+          if (grupo.cantidades.size !== esperado.size) {
+            throw new BadRequestException(
+              `La instancia de combo ${key} no coincide con la composición del combo ${grupo.comboId}`,
+            );
+          }
+          for (const [productoId, qtyEsperada] of esperado) {
+            if ((grupo.cantidades.get(productoId) ?? 0) !== qtyEsperada) {
+              throw new BadRequestException(
+                `La instancia de combo ${key} no coincide con la composición del combo ${grupo.comboId}`,
+              );
+            }
+          }
+          // Id de instancia persistido: el del cliente si vino, si no uno del server.
+          instanciaStoredId.set(key, grupo.comboInstanciaId || randomUUID());
+        }
+      }
+
+      // Marca qué instancias ya asignaron su "primera línea" (la del precio fijo).
+      const comboPrimeraLineaAsignada = new Set<string>();
 
       const extraIds = detalles
         .flatMap((d) => (d as any).extras ?? [])
@@ -357,11 +499,29 @@ export class PedidosService {
       for (const d of detalles as any[]) {
         const base = prodMap.get(d.productoId)!;
         const cantidad = Number(d.cantidad);
-        // SEGURIDAD: el precio SIEMPRE sale del producto en la DB, nunca del cliente.
-        // `d.precioUnitario` del DTO se ignora deliberadamente para evitar manipulación de precios.
-        const precioUnitario = base.precio;
         const categoriaId = base.categoriaId;
         const limiteExtrasGratis = base.cantExtrasGratis;
+
+        // SEGURIDAD: el precio SIEMPRE sale del servidor, nunca del cliente.
+        // `d.precioUnitario` del DTO se ignora deliberadamente.
+        // - Línea normal: precio del producto en la DB.
+        // - Línea de combo: la 1ra línea del comboId lleva oferta.precio (precio fijo);
+        //   las siguientes del mismo comboId van en $0.
+        let precioUnitario = base.precio;
+        let comboInstanciaId: string | null = null;
+        let comboNombre: string | null = null;
+        if (d.comboId) {
+          const def = comboMap.get(d.comboId)!;
+          const key = claveInstancia(d);
+          comboInstanciaId = instanciaStoredId.get(key)!;
+          comboNombre = def.nombre;
+          if (comboPrimeraLineaAsignada.has(key)) {
+            precioUnitario = 0;
+          } else {
+            precioUnitario = def.precio;
+            comboPrimeraLineaAsignada.add(key);
+          }
+        }
 
         const extrasDto = Array.isArray(d.extras) ? d.extras : [];
         const sinExtras = d.sinExtras === true;
@@ -426,6 +586,9 @@ export class PedidosService {
           subtotal,
           notas: d.notas?.trim?.() || null,
           sinExtras,
+          comboId: d.comboId || null,
+          comboInstanciaId,
+          comboNombre,
           producto: { connect: { id: d.productoId } },
           aderezos:
             aderezosIds.length > 0
@@ -436,7 +599,11 @@ export class PedidosService {
 
       // El descuento de stock se realiza una sola vez despues de crear el pedido
       // (ver bloque de auditoria con stockMovimiento mas abajo)
-      const lineasParaCalcular = detalles.map((d: any) => ({
+      // Las líneas de combo se EXCLUYEN del cálculo de ofertas automáticas:
+      // ya tienen su precio fijo, no deben recibir descuentos adicionales (2x1, %, etc.).
+      const lineasParaCalcular = (detalles as any[])
+        .filter((d) => !d.comboId)
+        .map((d: any) => ({
         productoId: d.productoId,
         cantidad: d.cantidad,
         // SEGURIDAD: precio real de la DB, nunca el del cliente (ver nota arriba).

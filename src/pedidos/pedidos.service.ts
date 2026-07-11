@@ -245,9 +245,15 @@ export class PedidosService {
             );
           }
 
+          // Multiset esperado: un combo puede repetir el mismo producto en varias
+          // filas de OfertaProducto (ej: 2x Pancho Simple). Se ACUMULA la cantidad
+          // de cada fila en vez de sobreescribir, así el conteo por producto es correcto.
           const esperado = new Map<string, number>();
           for (const p of combo.productos) {
-            esperado.set(p.productoId, p.cantidadMin ?? 1);
+            esperado.set(
+              p.productoId,
+              (esperado.get(p.productoId) ?? 0) + (p.cantidadMin ?? 1),
+            );
           }
           comboMap.set(comboId, {
             nombre: combo.nombre,

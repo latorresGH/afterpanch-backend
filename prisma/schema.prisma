@@ -414,7 +414,7 @@ model OfertaProducto {
   oferta        Oferta    @relation(fields: [ofertaId], references: [id], onDelete: Cascade)
   producto      Producto  @relation(fields: [productoId], references: [id])
 
-  @@unique([ofertaId, productoId])
+  @@unique([ofertaId, productoId, orden])
 }
 
 // DEPRECADO — reemplazado por OfertaProducto ordenado (lista fija). No usar en código nuevo.

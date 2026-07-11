@@ -74,14 +74,14 @@ export class OfertasService {
 
       if (dto.productos && dto.productos.length > 0) {
         await tx.ofertaProducto.createMany({
-          data: dto.productos.map((p) => ({
+          data: dto.productos.map((p, idx) => ({
             ofertaId: oferta.id,
             productoId: p.productoId,
             obligatorio: p.obligatorio ?? false,
             cantidadMin: p.cantidadMin ?? 1,
             cantidadMax: p.cantidadMax ?? null,
             precioEspecial: p.precioEspecial ?? null,
-            orden: p.orden ?? 0,
+            orden: p.orden ?? idx,
           })),
         });
       }
@@ -220,13 +220,14 @@ export class OfertasService {
 
         if (dto.productos.length > 0) {
           await tx.ofertaProducto.createMany({
-            data: dto.productos.map((p) => ({
+            data: dto.productos.map((p, idx) => ({
               ofertaId: id,
               productoId: p.productoId,
               obligatorio: p.obligatorio ?? false,
               cantidadMin: p.cantidadMin ?? 1,
               cantidadMax: p.cantidadMax ?? null,
               precioEspecial: p.precioEspecial ?? null,
+              orden: p.orden ?? idx,
             })),
           });
         }

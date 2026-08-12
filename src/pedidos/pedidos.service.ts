@@ -17,6 +17,7 @@ import {
 import { OfertasCalculatorService } from '../ofertas/ofertas-calculator.service';
 import { NegocioConfigService } from '../config/config.service';
 import { PedidosGateway } from './pedidos.gateway';
+import { tieneAccesoTracking } from './tracking.util';
 
 const ESTADOS_ABIERTOS: EstadoPedido[] = [
   EstadoPedido.PENDIENTE,
@@ -940,9 +941,7 @@ export class PedidosService {
     code: string | undefined,
     esEmpleado?: boolean,
   ): void {
-    if (esEmpleado) return;
-    if (trackingCode === null) return;
-    if (code !== trackingCode) {
+    if (!tieneAccesoTracking(trackingCode, code, esEmpleado)) {
       throw new NotFoundException('Pedido no encontrado');
     }
   }
@@ -1143,10 +1142,14 @@ export class PedidosService {
       );
     }
 
-    return this.prisma.pedido.update({
+    const actualizado = await this.prisma.pedido.update({
       where: { id },
       data: { estado: nuevoEstado },
     });
+    this.pedidosGateway.notificarActualizacionPedido(id, {
+      estado: actualizado.estado,
+    });
+    return actualizado;
   }
 
   private getTransicionesPorTipo(tipo: TipoPedidoDto, estadoActual: EstadoPedido): EstadoPedido[] {
@@ -1187,10 +1190,14 @@ export class PedidosService {
       );
     }
 
-    return this.prisma.pedido.update({
+    const actualizado = await this.prisma.pedido.update({
       where: { id },
       data: { estado: EstadoPedido.ENTREGADO },
     });
+    this.pedidosGateway.notificarActualizacionPedido(id, {
+      estado: actualizado.estado,
+    });
+    return actualizado;
   }
 
   async cancelarPedido(id: string, motivo: string, rol: Role) {
@@ -1382,6 +1389,11 @@ export class PedidosService {
           canceladoPor: rol,
         },
       });
+    }).then((actualizado) => {
+      this.pedidosGateway.notificarActualizacionPedido(id, {
+        estado: actualizado.estado,
+      });
+      return actualizado;
     });
   }
 
@@ -1437,10 +1449,14 @@ export class PedidosService {
       );
     }
 
-    return this.prisma.pedido.update({
+    const actualizado = await this.prisma.pedido.update({
       where: { id },
       data: { costoEnvio: costoEnvioNum },
     });
+    this.pedidosGateway.notificarActualizacionPedido(id, {
+      costoEnvio: actualizado.costoEnvio,
+    });
+    return actualizado;
   }
 
   async asignarRepartidor(
@@ -1473,12 +1489,18 @@ export class PedidosService {
       data.costoEnvio = costo;
     }
 
-    return this.prisma.pedido.update({
+    const actualizado = await this.prisma.pedido.update({
       where: { id },
       data,
       include: {
         repartidor: { select: { id: true, nombre: true } },
       },
     });
+    this.pedidosGateway.notificarActualizacionPedido(id, {
+      repartidorId: actualizado.repartidorId,
+      repartidor: actualizado.repartidor,
+      costoEnvio: actualizado.costoEnvio,
+    });
+    return actualizado;
   }
 }

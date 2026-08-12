@@ -5,6 +5,7 @@ import {
   Get,
   Patch,
   Param,
+  Query,
   UseGuards,
   Request,
   BadRequestException,
@@ -106,9 +107,22 @@ export class PedidosController {
 
   @Get(':id')
   @Public()
-  @ApiOperation({ summary: 'Obtener un pedido por ID' })
-  findOne(@Param('id') id: string) {
-    return this.pedidosService.findOne(id);
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({
+    summary: 'Obtener un pedido por ID',
+    description:
+      'Público solo con el trackingCode del pedido (?code=). Empleados autenticados ' +
+      '(ADMIN/TRABAJADOR) no necesitan el código.',
+  })
+  findOne(
+    @Param('id') id: string,
+    @Query('code') code: string,
+    @Request() req: any,
+  ) {
+    const actor = req.user ?? null;
+    const esEmpleado =
+      actor?.role === Role.ADMIN || actor?.role === Role.TRABAJADOR;
+    return this.pedidosService.findOne(id, code, esEmpleado);
   }
 
   @Patch(':id/estado')

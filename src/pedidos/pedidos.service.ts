@@ -4,7 +4,7 @@ import {
   NotFoundException,
   Logger,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreatePedidoDto, TipoPedidoDto } from './dto/create-pedido.dto';
 import {
@@ -650,10 +650,16 @@ export class PedidosService {
             apellidoCliente: true,
             numeroCliente: true,
             metodoPago: true,
+            trackingCode: true,
           },
         });
 
         if (!pedido) throw new NotFoundException('Pedido no encontrado');
+        this.verificarTrackingAcceso(
+          pedido.trackingCode,
+          dto.trackingCode,
+          esEmpleado,
+        );
         if (!ESTADOS_ABIERTOS.includes(pedido.estado))
           throw new BadRequestException('Pedido cerrado');
 
@@ -691,9 +697,11 @@ export class PedidosService {
           include: includeConfig,
         });
       } else {
+        const trackingCode = await this.generarTrackingCode(tx);
         pedidoResult = await tx.pedido.create({
           data: {
             tipo,
+            trackingCode,
             nombreCliente: nombreClienteLimpio!,
             apellidoCliente: apellidoClienteLimpio,
             metodoPago: (metodoPago as MetodoPago) ?? null,
@@ -902,6 +910,43 @@ export class PedidosService {
     });
   }
 
+  /**
+   * Genera un trackingCode único (48 bits, url-safe) para un pedido nuevo.
+   * Reintenta ante una colisión de la constraint unique (probabilidad ~1 en 2^48).
+   */
+  private async generarTrackingCode(
+    tx: Prisma.TransactionClient,
+  ): Promise<string> {
+    for (let intento = 0; intento < 3; intento++) {
+      const code = randomBytes(6).toString('base64url');
+      const existente = await tx.pedido.findUnique({
+        where: { trackingCode: code },
+        select: { id: true },
+      });
+      if (!existente) return code;
+    }
+    throw new Error('No se pudo generar un trackingCode único');
+  }
+
+  /**
+   * Verifica el acceso de tracking a un pedido cuando quien llama no es un
+   * empleado autenticado (ADMIN/TRABAJADOR). Los pedidos creados antes de
+   * introducir este campo tienen `trackingCode = null` y quedan accesibles
+   * solo por `id` (no se migran retroactivamente para no romper links ya
+   * compartidos con clientes).
+   */
+  private verificarTrackingAcceso(
+    trackingCode: string | null,
+    code: string | undefined,
+    esEmpleado?: boolean,
+  ): void {
+    if (esEmpleado) return;
+    if (trackingCode === null) return;
+    if (code !== trackingCode) {
+      throw new NotFoundException('Pedido no encontrado');
+    }
+  }
+
   private getExtraPrecio(
     extra: any,
     categoriaId: string | null | undefined,
@@ -1042,7 +1087,7 @@ export class PedidosService {
     });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, code?: string, esEmpleado?: boolean) {
     const pedido = await this.prisma.pedido.findUnique({
       where: { id },
       include: {
@@ -1067,6 +1112,7 @@ export class PedidosService {
     });
 
     if (!pedido) throw new NotFoundException('Pedido no encontrado');
+    this.verificarTrackingAcceso(pedido.trackingCode, code, esEmpleado);
     return pedido;
   }
 

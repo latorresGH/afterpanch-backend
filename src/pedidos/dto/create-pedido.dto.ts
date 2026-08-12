@@ -210,6 +210,15 @@ export class CreatePedidoDto {
   repartidorId?: string;
 
   @ApiPropertyOptional({
+    description:
+      'trackingCode del pedido (obligatorio para agregar ítems a un pedidoId existente ' +
+      'si quien llama no es un empleado autenticado).',
+  })
+  @IsOptional()
+  @IsString()
+  trackingCode?: string;
+
+  @ApiPropertyOptional({
     description: 'Origen del pedido (MENU = pedido web, no se envía desde POS)',
   })
   @IsOptional()

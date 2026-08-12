@@ -189,6 +189,11 @@ model Pedido {
   estado       EstadoPedido  @default(PENDIENTE)
   total        Float         @default(0)
 
+  // Credencial de tracking pública, separada del `id` interno. Null en pedidos
+  // creados antes de esta migración (siguen accesibles solo por `id`, ver
+  // PedidosService.verificarTrackingAcceso).
+  trackingCode String?       @unique
+
   nombreCliente   String?
   apellidoCliente String?
   numeroCliente   String?

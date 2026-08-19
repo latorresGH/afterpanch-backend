@@ -49,6 +49,13 @@ export class CajaService {
       const costoEnvio = Number(pedido.costoEnvio) || 0;
       const montoTotal = productosTotal + costoEnvio;
       const gananciaRepart = gananciaRepartidor ?? costoEnvio;
+
+      if (gananciaRepart > montoTotal) {
+        throw new BadRequestException(
+          `La ganancia del repartidor (${gananciaRepart}) no puede ser mayor al total del pedido (${montoTotal})`,
+        );
+      }
+
       const gananciaNegocio = productosTotal;
 
       const movimiento = await tx.cajaMovimiento.create({

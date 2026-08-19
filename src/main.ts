@@ -2,19 +2,20 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
+import cookieParser from 'cookie-parser';
 
 process.env.TZ = 'America/Argentina/Buenos_Aires';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // ✅ CORS restringido
-  //   const allowedOrigins = [
-  //   'http://localhost:3000',
-  //   'http://127.0.0.1:3000',
-  //   ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(s => s.trim()) : []),
-  // ];
+  app.use(cookieParser());
 
+  // ✅ CORS restringido
+  // Con auth por cookie HttpOnly, `credentials: true` es obligatorio (ya
+  // estaba) y FRONTEND_URL en producción debe apuntar exacto al origin del
+  // front (https://afterpanch.com.ar) para que el navegador acepte el
+  // Set-Cookie de respuesta cross-origin.
   app.enableCors({
     origin: (origin, callback) => {
       const allowedOrigins = [

@@ -2,11 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import cookieParser from 'cookie-parser';
 import { AppModule } from '../src/app.module';
+import { createAdminCookie } from './utils/auth-cookie';
 
 describe('Pedidos (e2e)', () => {
   let app: INestApplication<App>;
-  let authToken: string;
+  let authCookie: string;
   let productoId: string;
   let categoriaId: string;
   let extraId: string;
@@ -19,6 +21,7 @@ describe('Pedidos (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -34,25 +37,15 @@ describe('Pedidos (e2e)', () => {
   });
 
   describe('Setup inicial', () => {
-    it('debe registrar un usuario admin', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/auth/register')
-        .send({
-          email: `test-admin-${Date.now()}@test.com`,
-          password: 'password123',
-          nombre: 'Test Admin',
-          role: 'ADMIN',
-        })
-        .expect(201);
-
-      authToken = response.body.access_token;
-      expect(authToken).toBeDefined();
+    it('crea un admin autenticado (vía /auth/create-user)', async () => {
+      authCookie = await createAdminCookie(app);
+      expect(authCookie).toBeDefined();
     });
 
     it('debe crear una categoria', async () => {
       const response = await request(app.getHttpServer())
         .post('/categorias')
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Cookie', authCookie)
         .send({
           nombre: `Hamburguesas Test ${Date.now()}`,
           descripcion: 'Categoria de prueba',
@@ -65,7 +58,7 @@ describe('Pedidos (e2e)', () => {
     it('debe crear un insumo', async () => {
       const response = await request(app.getHttpServer())
         .post('/insumos')
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Cookie', authCookie)
         .send({
           nombre: `Carne Test ${Date.now()}`,
           stockInicial: 1000,
@@ -79,7 +72,7 @@ describe('Pedidos (e2e)', () => {
     it('debe crear un producto con receta', async () => {
       const response = await request(app.getHttpServer())
         .post('/productos')
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Cookie', authCookie)
         .send({
           nombre: `Hamburguesa Test ${Date.now()}`,
           precio: 1500,
@@ -94,7 +87,7 @@ describe('Pedidos (e2e)', () => {
     it('debe crear un extra con stock', async () => {
       const response = await request(app.getHttpServer())
         .post('/extras')
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Cookie', authCookie)
         .send({
           nombre: `Queso Extra Test ${Date.now()}`,
           precio: 200,
@@ -109,7 +102,7 @@ describe('Pedidos (e2e)', () => {
     it('debe crear un aderezo', async () => {
       const response = await request(app.getHttpServer())
         .post('/aderezos')
-        .set('Authorization', `Bearer ${authToken}`)
+        .set('Cookie', authCookie)
         .send({
           nombre: `Ketchup Test ${Date.now()}`,
         })
@@ -267,7 +260,7 @@ describe('Pedidos (e2e)', () => {
     it('debe descontar stock de insumos al crear pedido', async () => {
       const insumoAntes = await request(app.getHttpServer())
         .get(`/insumos/${insumoId}`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Cookie', authCookie);
 
       const stockAntes = Number(insumoAntes.body.stockActual);
 
@@ -287,7 +280,7 @@ describe('Pedidos (e2e)', () => {
 
       const insumoDespues = await request(app.getHttpServer())
         .get(`/insumos/${insumoId}`)
-        .set('Authorization', `Bearer ${authToken}`);
+        .set('Cookie', authCookie);
 
       const stockDespues = Number(insumoDespues.body.stockActual);
       const consumoPorProducto = 100;

@@ -2,7 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import cookieParser from 'cookie-parser';
 import { AppModule } from '../src/app.module';
+import { createAdminCookie } from './utils/auth-cookie';
 
 /**
  * TESTS CRÍTICOS DE CAJA
@@ -15,7 +17,7 @@ import { AppModule } from '../src/app.module';
  */
 describe('Caja Crítico (e2e)', () => {
   let app: INestApplication<App>;
-  let adminToken: string;
+  let adminCookie: string;
   let pedidoDeliveryId: string;
   let pedidoLocalId: string;
   let productoId: string;
@@ -27,6 +29,7 @@ describe('Caja Crítico (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -42,29 +45,20 @@ describe('Caja Crítico (e2e)', () => {
   });
 
   describe('Setup', () => {
-    it('crea usuario admin', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/auth/register')
-        .send({
-          email: `caja-test-${Date.now()}@test.com`,
-          password: 'password123',
-          nombre: 'Caja Test Admin',
-        })
-        .expect(201);
-
-      adminToken = response.body.access_token;
+    it('crea usuario admin (vía /auth/create-user)', async () => {
+      adminCookie = await createAdminCookie(app);
     });
 
     it('crea producto para tests', async () => {
       const catResponse = await request(app.getHttpServer())
         .post('/categorias')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({ nombre: `Caja Test Cat ${Date.now()}` })
         .expect(201);
 
       const insumoResponse = await request(app.getHttpServer())
         .post('/insumos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Insumo Caja ${Date.now()}`,
           stockInicial: 1000,
@@ -74,7 +68,7 @@ describe('Caja Crítico (e2e)', () => {
 
       const prodResponse = await request(app.getHttpServer())
         .post('/productos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Producto Caja ${Date.now()}`,
           precio: 2500,
@@ -90,7 +84,7 @@ describe('Caja Crítico (e2e)', () => {
       costoEnvio = 500;
       const response = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'DELIVERY',
           nombreCliente: 'Cliente Delivery',
@@ -111,7 +105,7 @@ describe('Caja Crítico (e2e)', () => {
     it('crea pedido LOCAL', async () => {
       const response = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'LOCAL',
           nombreCliente: 'Cliente Local',
@@ -132,7 +126,7 @@ describe('Caja Crítico (e2e)', () => {
     it('confirma pago de pedido DELIVERY', async () => {
       const response = await request(app.getHttpServer())
         .post(`/caja/pedido/${pedidoDeliveryId}/confirmar`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           confirmadoPor: 'Admin Test',
           gananciaRepartidor: costoEnvio,
@@ -146,7 +140,7 @@ describe('Caja Crítico (e2e)', () => {
     it('NO permite confirmar el mismo pedido 2 veces', async () => {
       const response = await request(app.getHttpServer())
         .post(`/caja/pedido/${pedidoDeliveryId}/confirmar`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           confirmadoPor: 'Admin Test',
           gananciaRepartidor: costoEnvio,
@@ -157,18 +151,21 @@ describe('Caja Crítico (e2e)', () => {
     });
 
     it('separación correcta de ganancias', async () => {
+      // Se consulta /caja/pedido/:id (no /caja/resumen) porque el resumen es
+      // un agregado global sin filtrar por pedido: en una DB compartida con
+      // movimientos de otras corridas/pedidos, sumar todo daría un total
+      // distinto al de este pedido puntual. Acá lo que importa es que ESTE
+      // movimiento separó bien la ganancia del negocio de la del repartidor.
       const response = await request(app.getHttpServer())
-        .get('/caja/resumen')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .get(`/caja/pedido/${pedidoDeliveryId}`)
+        .set('Cookie', adminCookie)
         .expect(200);
 
-      const resumen = response.body.resumen;
+      const [movimiento] = response.body;
 
-      // Verificar que las ganancias están separadas
-      expect(resumen.gananciaNegocioTotal).toBeDefined();
-      expect(resumen.gananciaRepartidorTotal).toBeDefined();
-      expect(resumen.gananciaNegocioTotal).toBeGreaterThanOrEqual(0);
-      expect(resumen.gananciaRepartidorTotal).toBe(costoEnvio);
+      expect(movimiento).toBeDefined();
+      expect(movimiento.gananciaNegocio).toBeGreaterThanOrEqual(0);
+      expect(movimiento.gananciaRepartidor).toBe(costoEnvio);
     });
   });
 
@@ -177,7 +174,7 @@ describe('Caja Crítico (e2e)', () => {
       // Crear y cancelar un pedido
       const pedidoResponse = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'DELIVERY',
           nombreCliente: 'Pedido a Cancelar',
@@ -189,14 +186,14 @@ describe('Caja Crítico (e2e)', () => {
 
       await request(app.getHttpServer())
         .post(`/pedidos/${pedidoResponse.body.id}/cancelar`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({ motivo: 'Test', rol: 'ADMIN' })
         .expect(201);
 
       // Intentar confirmar pago del pedido cancelado
       const confirmResponse = await request(app.getHttpServer())
         .post(`/caja/pedido/${pedidoResponse.body.id}/confirmar`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           confirmadoPor: 'Admin',
           gananciaRepartidor: 300,
@@ -209,7 +206,7 @@ describe('Caja Crítico (e2e)', () => {
     it('ganancia repartidor no puede ser mayor al total', async () => {
       const pedidoResponse = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'DELIVERY',
           nombreCliente: 'Test Ganancia',
@@ -222,7 +219,7 @@ describe('Caja Crítico (e2e)', () => {
       // Intentar con ganancia repartidor excesiva
       const confirmResponse = await request(app.getHttpServer())
         .post(`/caja/pedido/${pedidoResponse.body.id}/confirmar`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           confirmadoPor: 'Admin',
           gananciaRepartidor: 99999, // Mayor al total
@@ -236,7 +233,7 @@ describe('Caja Crítico (e2e)', () => {
     it('incluye movimientos del pedido', async () => {
       const response = await request(app.getHttpServer())
         .get('/caja/resumen')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .expect(200);
 
       expect(response.body.movimientos).toBeDefined();
@@ -247,7 +244,7 @@ describe('Caja Crítico (e2e)', () => {
     it('balance es coherente', async () => {
       const response = await request(app.getHttpServer())
         .get('/caja/resumen')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .expect(200);
 
       const { resumen } = response.body;

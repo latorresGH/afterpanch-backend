@@ -2,7 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import cookieParser from 'cookie-parser';
 import { AppModule } from '../src/app.module';
+import { createAdminCookie } from './utils/auth-cookie';
 
 /**
  * TESTS CRÍTICOS DE STOCK
@@ -16,7 +18,7 @@ import { AppModule } from '../src/app.module';
 describe('Stock Crítico (e2e)', () => {
   let app: INestApplication<App>;
   let authToken: string;
-  let adminToken: string;
+  let adminCookie: string;
   let productoId: string;
   let insumoId: string;
   let extraSinInsumoId: string;
@@ -29,6 +31,7 @@ describe('Stock Crítico (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -44,24 +47,15 @@ describe('Stock Crítico (e2e)', () => {
   });
 
   describe('Setup inicial', () => {
-    it('crea usuario admin para tests', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/auth/register')
-        .send({
-          email: `stock-test-${Date.now()}@test.com`,
-          password: 'password123',
-          nombre: 'Stock Test Admin',
-        })
-        .expect(201);
-
-      adminToken = response.body.access_token;
-      expect(adminToken).toBeDefined();
+    it('crea usuario admin para tests (vía /auth/create-user)', async () => {
+      adminCookie = await createAdminCookie(app);
+      expect(adminCookie).toBeDefined();
     });
 
     it('crea insumo para receta', async () => {
       const response = await request(app.getHttpServer())
         .post('/insumos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Carne Stock Test ${Date.now()}`,
           stockInicial: 1000,
@@ -76,7 +70,7 @@ describe('Stock Crítico (e2e)', () => {
     it('crea insumo para extra', async () => {
       const response = await request(app.getHttpServer())
         .post('/insumos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Queso Insumo Test ${Date.now()}`,
           stockInicial: 50,
@@ -90,7 +84,7 @@ describe('Stock Crítico (e2e)', () => {
     it('crea categoria', async () => {
       const response = await request(app.getHttpServer())
         .post('/categorias')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Stock Test Cat ${Date.now()}`,
         })
@@ -101,7 +95,7 @@ describe('Stock Crítico (e2e)', () => {
       // Crear producto con receta
       const prodResponse = await request(app.getHttpServer())
         .post('/productos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Hamburguesa Stock Test ${Date.now()}`,
           precio: 2000,
@@ -116,7 +110,7 @@ describe('Stock Crítico (e2e)', () => {
     it('crea extra SIN insumo asociado', async () => {
       const response = await request(app.getHttpServer())
         .post('/extras')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Extra Sin Insumo ${Date.now()}`,
           precio: 300,
@@ -132,7 +126,7 @@ describe('Stock Crítico (e2e)', () => {
     it('crea extra CON insumo asociado', async () => {
       const response = await request(app.getHttpServer())
         .post('/extras')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Extra Con Insumo ${Date.now()}`,
           precio: 500,
@@ -151,13 +145,13 @@ describe('Stock Crítico (e2e)', () => {
     it('descuenta stock de insumo al crear pedido', async () => {
       const insumoAntes = await request(app.getHttpServer())
         .get(`/insumos/${insumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       const stockAntes = Number(insumoAntes.body.stockActual);
 
       const pedidoResponse = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'LOCAL',
           nombreCliente: 'Stock Descuento Test',
@@ -172,7 +166,7 @@ describe('Stock Crítico (e2e)', () => {
 
       const insumoDespues = await request(app.getHttpServer())
         .get(`/insumos/${insumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       const stockDespues = Number(insumoDespues.body.stockActual);
       const consumoEsperado = 150 * 2; // 150gr por producto, 2 productos
@@ -183,13 +177,13 @@ describe('Stock Crítico (e2e)', () => {
     it('descuenta stock de EXTRA SIN insumo', async () => {
       const extraAntes = await request(app.getHttpServer())
         .get(`/extras/${extraSinInsumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       const stockAntes = Number(extraAntes.body.stockActual);
 
       await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'LOCAL',
           nombreCliente: 'Extra Sin Insumo Test',
@@ -205,7 +199,7 @@ describe('Stock Crítico (e2e)', () => {
 
       const extraDespues = await request(app.getHttpServer())
         .get(`/extras/${extraSinInsumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       const stockDespues = Number(extraDespues.body.stockActual);
 
@@ -215,20 +209,20 @@ describe('Stock Crítico (e2e)', () => {
     it('descuenta stock del INSUMO cuando extra tiene insumoId', async () => {
       const insumoAntes = await request(app.getHttpServer())
         .get(`/insumos/${insumoExtraId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       const stockInsumoAntes = Number(insumoAntes.body.stockActual);
 
       const extraAntes = await request(app.getHttpServer())
         .get(`/extras/${extraConInsumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       // El stock del extra NO debe cambiar (se controla por insumo)
       const stockExtraAntes = Number(extraAntes.body.stockActual);
 
       await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'LOCAL',
           nombreCliente: 'Extra Con Insumo Test',
@@ -244,7 +238,7 @@ describe('Stock Crítico (e2e)', () => {
 
       const insumoDespues = await request(app.getHttpServer())
         .get(`/insumos/${insumoExtraId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       const stockInsumoDespues = Number(insumoDespues.body.stockActual);
 
@@ -254,7 +248,7 @@ describe('Stock Crítico (e2e)', () => {
       // El stock del EXTRA no debe haber cambiado
       const extraDespues = await request(app.getHttpServer())
         .get(`/extras/${extraConInsumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       expect(Number(extraDespues.body.stockActual)).toBe(stockExtraAntes);
     });
@@ -268,19 +262,19 @@ describe('Stock Crítico (e2e)', () => {
     it('crea pedido para luego cancelar', async () => {
       const insumoAntes = await request(app.getHttpServer())
         .get(`/insumos/${insumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       stockInsumoAntes = Number(insumoAntes.body.stockActual);
 
       const extraAntes = await request(app.getHttpServer())
         .get(`/extras/${extraSinInsumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       stockExtraAntes = Number(extraAntes.body.stockActual);
 
       const response = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'LOCAL',
           nombreCliente: 'Pedido a Cancelar',
@@ -300,7 +294,7 @@ describe('Stock Crítico (e2e)', () => {
     it('restaura stock al cancelar pedido', async () => {
       await request(app.getHttpServer())
         .post(`/pedidos/${pedidoId}/cancelar`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           motivo: 'Test de cancelación',
           rol: 'ADMIN',
@@ -309,11 +303,11 @@ describe('Stock Crítico (e2e)', () => {
 
       const insumoDespues = await request(app.getHttpServer())
         .get(`/insumos/${insumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       const extraDespues = await request(app.getHttpServer())
         .get(`/extras/${extraSinInsumoId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
+        .set('Cookie', adminCookie);
 
       // Stock restaurado
       expect(Number(insumoDespues.body.stockActual)).toBe(stockInsumoAntes);
@@ -326,7 +320,7 @@ describe('Stock Crítico (e2e)', () => {
       // Crear insumo con poco stock
       const response = await request(app.getHttpServer())
         .post('/insumos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Insumo Limitado ${Date.now()}`,
           stockInicial: 50,
@@ -339,13 +333,13 @@ describe('Stock Crítico (e2e)', () => {
       // Crear categoria y producto
       const catResponse = await request(app.getHttpServer())
         .post('/categorias')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({ nombre: `Cat Limitada ${Date.now()}` })
         .expect(201);
 
       const prodResponse = await request(app.getHttpServer())
         .post('/productos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Producto Limitado ${Date.now()}`,
           precio: 1000,
@@ -359,7 +353,7 @@ describe('Stock Crítico (e2e)', () => {
       // Intentar pedir más de lo que hay
       const pedidoResponse = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'LOCAL',
           nombreCliente: 'Test Stock Insuficiente',
@@ -379,7 +373,7 @@ describe('Stock Crítico (e2e)', () => {
       // Crear extra con poco stock
       const response = await request(app.getHttpServer())
         .post('/extras')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           nombre: `Extra Limitado ${Date.now()}`,
           precio: 100,
@@ -393,7 +387,7 @@ describe('Stock Crítico (e2e)', () => {
       // Intentar pedir más extras de los que hay
       const pedidoResponse = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'LOCAL',
           nombreCliente: 'Test Extra Insuficiente',
@@ -415,7 +409,7 @@ describe('Stock Crítico (e2e)', () => {
     it('los primeros 2 extras son gratis', async () => {
       const response = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'LOCAL',
           nombreCliente: 'Extras Gratis Test',
@@ -441,7 +435,7 @@ describe('Stock Crítico (e2e)', () => {
     it('a partir del 3er extra se cobra', async () => {
       const response = await request(app.getHttpServer())
         .post('/pedidos')
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Cookie', adminCookie)
         .send({
           tipo: 'LOCAL',
           nombreCliente: 'Extras Cobrados Test',

@@ -21,7 +21,24 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
-      message = exception.getResponse();
+      const exceptionResponse = exception.getResponse();
+      // Las HttpException de Nest (incl. las que arma ValidationPipe) ya
+      // devuelven { statusCode, message, error } en getResponse(). Si acá
+      // asignáramos ese objeto entero a `message`, quedaría doblemente
+      // anidado (`errorResponse.message.message`) en vez del string/array
+      // real que espera el resto de la API.
+      if (typeof exceptionResponse === 'string') {
+        message = exceptionResponse;
+      } else if (
+        exceptionResponse &&
+        typeof exceptionResponse === 'object' &&
+        'message' in exceptionResponse
+      ) {
+        const body = exceptionResponse as { message: string | string[] };
+        message = body.message;
+      } else {
+        message = exceptionResponse;
+      }
     }
 
     const isProduction = process.env.NODE_ENV === 'production';

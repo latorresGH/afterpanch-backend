@@ -3,6 +3,11 @@
 /node_modules
 /build
 
+# Cache incremental de TypeScript. NUNCA se commitea: si viaja al build de
+# Docker, tsc lo cree al pie de la letra, no emite nada y `deleteOutDir` deja
+# dist/ vacio -> "Cannot find module '/app/dist/main'".
+*.tsbuildinfo
+
 # Logs
 logs
 *.log

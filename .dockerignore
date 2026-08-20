@@ -5,6 +5,7 @@ npm-debug.log
 # Build outputs
 dist
 build
+*.tsbuildinfo
 
 # Tests y coverage
 coverage
@@ -45,5 +46,9 @@ docs
 # Cosas de NestJS
 .eslintrc.js
 .prettierrc
-nest-cli.json
-tsconfig.build.json
+
+# OJO: nest-cli.json y tsconfig.build.json NO se ignoran.
+# Estaban listados aca y por eso el build DENTRO del contenedor corria sin
+# ellos: `nest build` caia al tsconfig.json base (que no excluye nada) y la
+# salida terminaba en dist/src/ en vez de dist/. Son parte del build, tienen
+# que viajar a la imagen.

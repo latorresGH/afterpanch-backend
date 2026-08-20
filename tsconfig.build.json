@@ -1,4 +1,27 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+  "compilerOptions": {
+    // Fijado explícitamente para que la salida sea SIEMPRE plana en dist/
+    // (dist/main.js). Sin esto, TypeScript infiere el rootDir como el ancestro
+    // común de todos los archivos incluidos: bastaba con que entrara un .ts de
+    // fuera de src/ (prisma/seed.ts) para que subiera a la raíz del repo y toda
+    // la salida se corriera a dist/src/, rompiendo el CMD del Dockerfile.
+    // Ahora, si alguien vuelve a meter un .ts de afuera, el build FALLA con un
+    // error claro en vez de mover el entrypoint en silencio.
+    "rootDir": "./src",
+    // El cache incremental va DENTRO de dist/ para que `deleteOutDir` de
+    // nest-cli lo borre junto con la salida. Si queda fuera (que es donde caia
+    // por defecto al fijar rootDir), sobrevive al borrado de dist/, tsc cree
+    // que ya esta todo compilado, no emite nada y el build termina en exit 0
+    // con dist/ VACIO -> "Cannot find module '/app/dist/main'".
+    "tsBuildInfoFile": "./dist/tsconfig.build.tsbuildinfo"
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "prisma",
+    "**/*spec.ts"
+  ]
 }

@@ -11,17 +11,99 @@ import {
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
+import { parse as parseCookie } from 'cookie';
 import { JwtStrategy } from '../auth/jwt.strategy';
+import { AUTH_COOKIE_NAME } from '../auth/auth-cookie.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { tieneAccesoTracking } from './tracking.util';
 
 const ROOM_STAFF = 'staff';
 const roomPedido = (id: string) => `pedido:${id}`;
 
+/**
+ * Códigos de `join-error` que el frontend distingue. `SESION_INVALIDA` es el
+ * único que debe disparar logout: significa que la cookie no llegó, venció o
+ * el usuario ya no existe / está inactivo, y reintentar no lo va a arreglar.
+ * `ROL_NO_AUTORIZADO` es un estado legítimo (un CLIENTE o DELIVERY conectado
+ * al mismo gateway), no un problema de sesión.
+ */
+export const WS_JOIN_ERROR = {
+  SESION_INVALIDA: 'SESION_INVALIDA',
+  ROL_NO_AUTORIZADO: 'ROL_NO_AUTORIZADO',
+} as const;
+
+/** Lo que queda guardado en `client.data.user` tras el handshake. */
+export interface UsuarioSocket {
+  sub: string;
+  role: Role;
+  email: string;
+  nombre: string;
+}
+
+const ORIGENES_DEV = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
+/**
+ * Devuelve el origin con y sin `www.`. En producción el staff entra por
+ * `https://www.afterpanch.com.ar`, pero FRONTEND_URL puede estar seteado sin
+ * www (o al revés): sin esta expansión, parte del staff queda afuera del
+ * socket según por dónde haya entrado.
+ */
+function conYSinWww(origen: string): string[] {
+  const limpio = origen.trim().replace(/\/+$/, '');
+  try {
+    const url = new URL(limpio);
+    const hostSinWww = url.host.startsWith('www.')
+      ? url.host.slice(4)
+      : url.host;
+    return [
+      `${url.protocol}//${hostSinWww}`,
+      `${url.protocol}//www.${hostSinWww}`,
+    ];
+  } catch {
+    // No es una URL parseable: se deja tal cual y simplemente no va a matchear.
+    return [limpio];
+  }
+}
+
+/**
+ * Allowlist de orígenes del WebSocket. Lee `process.env` en cada llamada a
+ * propósito (y no una sola vez al cargar el módulo) para que los tests puedan
+ * cambiar FRONTEND_URL sin tener que recargar el módulo.
+ */
+export function construirOrigenesPermitidos(
+  frontendUrl: string | undefined = process.env.FRONTEND_URL,
+): string[] {
+  const desdeEnv = (frontendUrl ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const expandidos = new Set<string>();
+  for (const origen of [...ORIGENES_DEV, ...desdeEnv]) {
+    for (const variante of conYSinWww(origen)) expandidos.add(variante);
+  }
+  return [...expandidos];
+}
+
+export function origenPermitido(origen: string | undefined): boolean {
+  // Sin header `Origin` no hay navegador del otro lado (healthcheck, script,
+  // cliente nativo). Se deja pasar igual que en el CORS HTTP de main.ts: por sí
+  // solo no gana nada, porque entrar a la room de staff sigue exigiendo cookie.
+  if (!origen) return true;
+  return construirOrigenesPermitidos().includes(origen);
+}
+
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    // Callback en vez de string: el CORS de socket.io corre ANTES que
+    // handleConnection y aplica al handshake de polling. Si acá quedara solo
+    // FRONTEND_URL, el origin con www se rechazaría antes de que el chequeo de
+    // handleConnection llegue a correr. Las dos capas comparten la allowlist.
+    origin: (origin, callback) => {
+      if (origenPermitido(origin)) return callback(null, true);
+      return callback(new Error('Origin no permitido (WebSocket)'), false);
+    },
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -41,52 +123,92 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
   }
 
   /**
-   * ⚠️ TEMPORAL — SACAR DESPUÉS DE VERIFICAR.
+   * 🍪 Autenticación en el handshake.
    *
-   * Solo diagnóstico: confirmar en producción (detrás del Cloudflare Tunnel)
-   * que la cookie HttpOnly `afterpanch_token` llega al handshake del WebSocket.
-   * Es lo único que la auditoría no pudo verificar sin acceso al túnel real.
+   * El JWT ya no viaja en el body de `join-staff`: el cliente no puede leer una
+   * cookie HttpOnly, así que ese camino quedó muerto al migrar el auth HTTP.
+   * Ahora el navegador manda la cookie sola en el handshake y el usuario se
+   * resuelve UNA vez por conexión.
    *
-   * No valida ni cambia nada: la auth sigue siendo la de siempre (join-staff
-   * recibe el token en el body del mensaje). No loguea el valor de la cookie,
-   * solo si está presente, para no filtrar el JWT a los logs del contenedor.
+   * Importante: una cookie ausente o inválida NO rechaza la conexión. El mismo
+   * gateway atiende `join-pedido`, el tracking público del cliente, que es
+   * anónimo por diseño. Solo `join-staff` exige usuario.
    */
-  handleConnection(client: Socket) {
-    console.log('[DIAGNÓSTICO WS]', {
-      origin: client.handshake.headers.origin,
-      tieneCookieHeader: !!client.handshake.headers.cookie,
-      contieneAuthCookie:
-        client.handshake.headers.cookie?.includes('afterpanch_token') ?? false,
-    });
-  }
-
-  /**
-   * Un socket de staff (campanita admin/POS) debe unirse explícitamente a
-   * esta room mandando su JWT. Reutiliza JwtStrategy.validate (mismo chequeo
-   * de usuario existente + activo que ya protege las rutas HTTP) para no
-   * duplicar esa lógica acá.
-   */
-  @SubscribeMessage('join-staff')
-  async handleJoinStaff(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() body: { token?: string },
-  ) {
-    if (!body?.token) {
-      client.emit('join-error', { room: ROOM_STAFF, message: 'Token requerido' });
+  async handleConnection(client: Socket) {
+    if (!origenPermitido(client.handshake.headers.origin)) {
+      client.disconnect(true);
       return;
     }
 
+    client.data.user = await this.resolverUsuarioDelHandshake(client);
+  }
+
+  /**
+   * Los mismos dos pasos que hacía `handleJoinStaff` con el token del body:
+   * verificar la firma del JWT y revalidar contra la DB con
+   * `JwtStrategy.validate` (usuario existente + activo), que es la misma
+   * comprobación que protege las rutas HTTP. Devuelve `null` ante cualquier
+   * fallo; no distingue el motivo a propósito.
+   */
+  private async resolverUsuarioDelHandshake(
+    client: Socket,
+  ): Promise<UsuarioSocket | null> {
+    const header = client.handshake.headers.cookie;
+    if (!header) return null;
+
+    let token: string | undefined;
     try {
-      const payload = await this.jwtService.verifyAsync(body.token);
-      const user = await this.jwtStrategy.validate(payload);
-      if (user.role !== Role.ADMIN && user.role !== Role.TRABAJADOR) {
-        client.emit('join-error', { room: ROOM_STAFF, message: 'Rol no autorizado' });
-        return;
-      }
-      client.join(ROOM_STAFF);
+      // cookie-parser es middleware de Express y no corre para socket.io, así
+      // que el header crudo hay que parsearlo a mano con el paquete `cookie`.
+      // Está declarado en package.json a propósito: antes se usaba como
+      // dependencia transitiva de cookie-parser, y un dedupe o un bump de ese
+      // paquete lo podía mover y romper el build sin aviso.
+      //
+      // Ojo con el tipo: @types/cookie declara `Record<string, string>`, pero
+      // si la cookie no vino el valor real en runtime es `undefined`. El
+      // chequeo de abajo no es decorativo, es lo único que cubre ese caso.
+      token = parseCookie(header)[AUTH_COOKIE_NAME];
     } catch {
-      client.emit('join-error', { room: ROOM_STAFF, message: 'Token inválido' });
+      return null;
     }
+    if (!token) return null;
+
+    try {
+      const payload = await this.jwtService.verifyAsync(token);
+      return (await this.jwtStrategy.validate(payload)) as UsuarioSocket;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Un socket de staff (campanita admin/POS) pide entrar a la room. El usuario
+   * ya viene resuelto del handshake; acá solo se chequea el rol. La regla de
+   * roles no cambió: cambió de dónde sale el usuario.
+   */
+  @SubscribeMessage('join-staff')
+  handleJoinStaff(@ConnectedSocket() client: Socket) {
+    const user: UsuarioSocket | null = client.data?.user ?? null;
+
+    if (!user) {
+      client.emit('join-error', {
+        room: ROOM_STAFF,
+        code: WS_JOIN_ERROR.SESION_INVALIDA,
+        message: 'Sesión inválida o vencida',
+      });
+      return;
+    }
+
+    if (user.role !== Role.ADMIN && user.role !== Role.TRABAJADOR) {
+      client.emit('join-error', {
+        room: ROOM_STAFF,
+        code: WS_JOIN_ERROR.ROL_NO_AUTORIZADO,
+        message: 'Rol no autorizado',
+      });
+      return;
+    }
+
+    client.join(ROOM_STAFF);
   }
 
   /**

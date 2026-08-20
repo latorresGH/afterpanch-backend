@@ -85,12 +85,19 @@ export class AuthController {
   }
 
   @Post('logout')
+  @Public()
   @HttpCode(200)
   @ApiOperation({
     summary: 'Cerrar sesión',
     description: 'Limpia la cookie de sesión HttpOnly.',
   })
   @ApiResponse({ status: 200, description: 'Logout exitoso' })
+  // Es @Public() a propósito: cerrar sesión no requiere una sesión válida.
+  // Cuando estaba detrás del guard, un usuario cuyo token ya no servía (cuenta
+  // borrada, token vencido) recibía 401 y clearCookie NUNCA llegaba a correr,
+  // así que la cookie sobrevivía en el navegador y quedaba trabado en un loop
+  // (login → home del rol → 401 → login...). No expone nada: no recibe input y
+  // sólo borra la cookie de quien llama.
   logout(@Res({ passthrough: true }) res: Response) {
     // clearCookie necesita las mismas opciones de domain/path que se usaron
     // al setear la cookie, si no el navegador no la reconoce y no la borra.

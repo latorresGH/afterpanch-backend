@@ -56,8 +56,18 @@ export class UsersService {
     });
   }
 
-  async findOne(id: string) {
-    const u = await this.prisma.user.findUnique({
+  /**
+   * Busca un usuario por id y devuelve `null` si no existe, en vez de tirar.
+   *
+   * Lo usa el flujo de validación del JWT (`JwtStrategy.validate`): si el
+   * usuario del token ya no está en la DB, la respuesta correcta es 401
+   * (la sesión no vale) y no 404 (que significa "el recurso que pediste no
+   * existe" — pero el recurso pedido era, por ejemplo, /pedidos, no el usuario).
+   * Ese 404 dejaba al cliente sin poder reaccionar: el interceptor del frontend
+   * solo escucha 401, así que ni siquiera podía desloguearse.
+   */
+  async findByIdOrNull(id: string) {
+    return this.prisma.user.findUnique({
       where: { id },
       select: {
         id: true,
@@ -68,6 +78,14 @@ export class UsersService {
         createdAt: true,
       },
     });
+  }
+
+  /**
+   * Versión estricta para el panel (GET /users/:id): acá el usuario SÍ es el
+   * recurso pedido, así que un 404 es lo correcto.
+   */
+  async findOne(id: string) {
+    const u = await this.findByIdOrNull(id);
     if (!u) throw new NotFoundException('Usuario no encontrado');
     return u;
   }

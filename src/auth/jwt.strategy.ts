@@ -20,8 +20,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    // ✅ Validar que el usuario siga existiendo y esté activo
-    const user = await this.usersService.findOne(payload.sub);
+    // ✅ Validar que el usuario siga existiendo y esté activo.
+    // Se usa findByIdOrNull (y no findOne) a propósito: findOne tira
+    // NotFoundException, y ese 404 se escapaba tal cual al cliente en CUALQUIER
+    // endpoint autenticado cuando el usuario del token había sido borrado,
+    // dejando muerto el chequeo de acá abajo. Acá un usuario inexistente es una
+    // sesión inválida → 401.
+    const user = await this.usersService.findByIdOrNull(payload.sub);
     if (!user) {
       throw new UnauthorizedException('Usuario no encontrado');
     }

@@ -3,6 +3,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
   OnGatewayInit,
+  OnGatewayConnection,
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
@@ -25,7 +26,7 @@ const roomPedido = (id: string) => `pedido:${id}`;
     credentials: true,
   },
 })
-export class PedidosGateway implements OnGatewayInit {
+export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
   @WebSocketServer()
   server: Server;
 
@@ -37,6 +38,26 @@ export class PedidosGateway implements OnGatewayInit {
 
   afterInit(server: Server) {
     console.log('[WebSocket] PedidosGateway initialized');
+  }
+
+  /**
+   * ⚠️ TEMPORAL — SACAR DESPUÉS DE VERIFICAR.
+   *
+   * Solo diagnóstico: confirmar en producción (detrás del Cloudflare Tunnel)
+   * que la cookie HttpOnly `afterpanch_token` llega al handshake del WebSocket.
+   * Es lo único que la auditoría no pudo verificar sin acceso al túnel real.
+   *
+   * No valida ni cambia nada: la auth sigue siendo la de siempre (join-staff
+   * recibe el token en el body del mensaje). No loguea el valor de la cookie,
+   * solo si está presente, para no filtrar el JWT a los logs del contenedor.
+   */
+  handleConnection(client: Socket) {
+    console.log('[DIAGNÓSTICO WS]', {
+      origin: client.handshake.headers.origin,
+      tieneCookieHeader: !!client.handshake.headers.cookie,
+      contieneAuthCookie:
+        client.handshake.headers.cookie?.includes('afterpanch_token') ?? false,
+    });
   }
 
   /**

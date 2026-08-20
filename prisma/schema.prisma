@@ -224,6 +224,15 @@ model Pedido {
   ofertasAplicadas PedidoOferta[]
   movimientosCaja  CajaMovimiento[]
   createdAt        DateTime      @default(now())
+
+  // Hasta acá Pedido no tenía NINGÚN índice: cualquier consulta que filtrara
+  // por estado o fecha hacía seq scan sobre la tabla entera. Los tres cubren
+  // lo que se consulta de verdad: el monitor y el Home filtran por estado,
+  // los listados y resúmenes ordenan por fecha, y el bloque de delivery
+  // pendientes filtra por tipo + estado.
+  @@index([estado])
+  @@index([createdAt])
+  @@index([tipo, estado])
 }
 
 model PedidoDetalle {

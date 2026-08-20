@@ -343,5 +343,47 @@ describe('PedidosGateway — auth por cookie en el handshake', () => {
         expect.objectContaining({ id: 'p-1', total: 9600 }),
       );
     });
+
+    it('notificarCambioPedidos avisa a la room staff', () => {
+      const emit = jest.fn();
+      const to = jest.fn(() => ({ emit }));
+      gateway.server = { to } as any;
+
+      gateway.notificarCambioPedidos('estado-cambiado', 'p-1');
+
+      expect(to).toHaveBeenCalledWith('staff');
+      expect(emit).toHaveBeenCalledWith(
+        'pedidos-actualizados',
+        expect.objectContaining({ motivo: 'estado-cambiado', pedidoId: 'p-1' }),
+      );
+    });
+
+    it('notificarCambioPedidos NO manda datos del pedido, solo el aviso', () => {
+      // A propósito: el cliente refetchea GET /pedidos/activos. Si mandáramos
+      // el pedido acá habría dos formas de armar el mismo objeto.
+      const emit = jest.fn();
+      gateway.server = { to: jest.fn(() => ({ emit })) } as any;
+
+      gateway.notificarCambioPedidos('pedido-creado', 'p-1');
+
+      const payload = emit.mock.calls[0][1];
+      expect(Object.keys(payload).sort()).toEqual([
+        'motivo',
+        'pedidoId',
+        'timestamp',
+      ]);
+    });
+
+    it('notificarActualizacionPedido sigue yendo SOLO a la room del pedido', () => {
+      // El tracking público no debe recibir el evento de staff ni al revés.
+      const emit = jest.fn();
+      const to = jest.fn(() => ({ emit }));
+      gateway.server = { to } as any;
+
+      gateway.notificarActualizacionPedido('p-1', { estado: 'EN_CAMINO' });
+
+      expect(to).toHaveBeenCalledWith('pedido:p-1');
+      expect(to).not.toHaveBeenCalledWith('staff');
+    });
   });
 });

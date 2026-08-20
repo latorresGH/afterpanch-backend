@@ -94,6 +94,21 @@ export class PedidosController {
     return this.pedidosService.setDemoraManual({ modo, minutos });
   }
 
+  // ⚠️ Va ANTES de @Get(':id'): Nest resuelve las rutas en orden de
+  // declaración, así que si quedara después, 'activos' entraría como :id.
+  @Get('activos')
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
+  @ApiOperation({
+    summary: 'Listar pedidos activos (monitor del POS)',
+    description:
+      'Pedidos que todavía se están trabajando (todos menos ENTREGADO y ' +
+      'CANCELADO), con solo los campos que el monitor renderiza. Payload ' +
+      'acotado: no crece con el histórico, a diferencia de GET /pedidos.',
+  })
+  listarActivos() {
+    return this.pedidosService.listarActivos();
+  }
+
   @Get('delivery-pendientes')
   @ApiOperation({
     summary: 'Listar pedidos de delivery pendientes',

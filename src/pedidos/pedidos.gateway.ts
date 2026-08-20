@@ -259,6 +259,27 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
   }
 
   /**
+   * Aviso al staff de que la lista de pedidos cambió.
+   *
+   * `notificarActualizacionPedido` solo llega a la room `pedido:${id}` (el
+   * tracking del cliente), así que un cambio hecho desde OTRA terminal nunca
+   * llegaba al monitor del POS: se enteraba recién en el siguiente tick del
+   * polling. Este evento cubre ese hueco.
+   *
+   * Es deliberadamente un aviso "algo cambió", sin los datos del pedido: el
+   * cliente refetchea GET /pedidos/activos, que ya es barato. Así no hay dos
+   * formas distintas de armar el mismo objeto ni riesgo de que el payload del
+   * socket quede desincronizado del endpoint.
+   */
+  notificarCambioPedidos(motivo: string, pedidoId?: string) {
+    this.server.to(ROOM_STAFF).emit('pedidos-actualizados', {
+      motivo,
+      pedidoId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
    * Cambios en vivo de UN pedido (estado, repartidor, costoEnvio) — solo
    * llegan a quien se unió a `pedido:${pedidoId}` con el trackingCode
    * correcto, nunca a un broadcast global.

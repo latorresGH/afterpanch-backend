@@ -26,6 +26,28 @@ const ESTADOS_ABIERTOS: EstadoPedido[] = [
   EstadoPedido.EN_CAMINO,
 ];
 
+/** Un pedido en estos estados ya no se trabaja: sale del monitor. */
+const ESTADOS_CERRADOS: EstadoPedido[] = [
+  EstadoPedido.ENTREGADO,
+  EstadoPedido.CANCELADO,
+];
+
+/**
+ * Estados que muestra el monitor del POS.
+ *
+ * Se define por EXCLUSIÓN de los cerrados, no reusando ESTADOS_ABIERTOS: esa
+ * constante no incluye PROBLEMA_DIRECCION, y el monitor hoy sí muestra esos
+ * pedidos (filtra en el cliente por `estado !== CANCELADO && !== ENTREGADO`).
+ * Reusarla habría escondido en silencio los pedidos con problema de dirección,
+ * justo en la pantalla donde hay que resolverlos.
+ *
+ * Derivarlo del enum además evita que se desincronice si mañana se agrega un
+ * estado nuevo: aparece en el monitor por defecto, igual que hoy.
+ */
+export const ESTADOS_MONITOR: EstadoPedido[] = Object.values(
+  EstadoPedido,
+).filter((estado) => !ESTADOS_CERRADOS.includes(estado));
+
 const TRANSICIONES_VALIDAS: Record<EstadoPedido, EstadoPedido[]> = {
   [EstadoPedido.PENDIENTE]: [EstadoPedido.EN_PREPARACION, EstadoPedido.CANCELADO],
   [EstadoPedido.EN_PREPARACION]: [EstadoPedido.LISTO_PARA_RETIRAR, EstadoPedido.CANCELADO],
@@ -907,6 +929,11 @@ export class PedidosService {
         });
       }
 
+      // Sin importar el origen: el monitor de las demas terminales tiene que
+      // enterarse. Es solo un aviso "refresca", asi que si la transaccion
+      // fallara despues, lo peor que pasa es un refetch de mas.
+      this.pedidosGateway.notificarCambioPedidos('pedido-creado', pedidoResult.id);
+
       return pedidoResult;
     });
   }
@@ -1072,6 +1099,60 @@ export class PedidosService {
     });
   }
 
+  /**
+   * Pedidos que el monitor del POS tiene abiertos en pantalla.
+   *
+   * A diferencia de `listarTodos()`, que devuelve el histórico COMPLETO con
+   * todas las relaciones anidadas para que el cliente filtre, acá el filtro es
+   * server-side y el `select` trae solo los campos que el monitor renderiza
+   * (más los que necesita el ticket de impresión, que recibe el pedido tal
+   * cual). El payload queda acotado: crece con los pedidos abiertos, no con el
+   * histórico.
+   *
+   * Se excluyen a propósito: `movimientosCaja` (el monitor no los muestra),
+   * el objeto `producto` entero (solo hace falta el nombre) y los campos de
+   * geocoding/envío, que no se renderizan acá.
+   */
+  async listarActivos() {
+    return this.prisma.pedido.findMany({
+      where: { estado: { in: ESTADOS_MONITOR } },
+      select: {
+        id: true,
+        tipo: true,
+        estado: true,
+        total: true,
+        costoEnvio: true,
+        createdAt: true,
+        nombreCliente: true,
+        apellidoCliente: true,
+        numeroCliente: true,
+        metodoPago: true,
+        direccion: true,
+        repartidorId: true,
+        repartidor: { select: { id: true, nombre: true } },
+        detalles: {
+          select: {
+            id: true,
+            cantidad: true,
+            subtotal: true,
+            precioUnitario: true,
+            notas: true,
+            sinExtras: true,
+            extras: true,
+            comboId: true,
+            comboInstanciaId: true,
+            comboNombre: true,
+            producto: { select: { id: true, nombre: true } },
+            aderezos: { select: { id: true, nombre: true } },
+          },
+        },
+      },
+      // El monitor ordena por fecha ascendente (lo más viejo primero, que es
+      // lo que hay que despachar). Se ordena acá para que llegue listo.
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async listarDeliveryPendientes() {
     return this.prisma.pedido.findMany({
       where: {
@@ -1149,6 +1230,7 @@ export class PedidosService {
     this.pedidosGateway.notificarActualizacionPedido(id, {
       estado: actualizado.estado,
     });
+    this.pedidosGateway.notificarCambioPedidos('estado-cambiado', id);
     return actualizado;
   }
 
@@ -1197,6 +1279,7 @@ export class PedidosService {
     this.pedidosGateway.notificarActualizacionPedido(id, {
       estado: actualizado.estado,
     });
+    this.pedidosGateway.notificarCambioPedidos('pedido-finalizado', id);
     return actualizado;
   }
 
@@ -1393,6 +1476,7 @@ export class PedidosService {
       this.pedidosGateway.notificarActualizacionPedido(id, {
         estado: actualizado.estado,
       });
+      this.pedidosGateway.notificarCambioPedidos('pedido-cancelado', id);
       return actualizado;
     });
   }
@@ -1413,7 +1497,7 @@ export class PedidosService {
       );
     }
 
-    return this.prisma.pedido.update({
+    const actualizado = await this.prisma.pedido.update({
       where: { id },
       data: {
         metodoPago: dto.metodoPago === undefined ? undefined : dto.metodoPago,
@@ -1423,6 +1507,10 @@ export class PedidosService {
             : dto.numeroCliente?.trim?.() || null,
       },
     });
+    // El monitor muestra el metodo de pago, asi que este cambio tambien
+    // tiene que refrescar las otras terminales.
+    this.pedidosGateway.notificarCambioPedidos('pago-actualizado', id);
+    return actualizado;
   }
 
   async setCostoEnvio(id: string, costoEnvio: number) {
@@ -1456,6 +1544,7 @@ export class PedidosService {
     this.pedidosGateway.notificarActualizacionPedido(id, {
       costoEnvio: actualizado.costoEnvio,
     });
+    this.pedidosGateway.notificarCambioPedidos('costo-envio-actualizado', id);
     return actualizado;
   }
 
@@ -1501,6 +1590,7 @@ export class PedidosService {
       repartidor: actualizado.repartidor,
       costoEnvio: actualizado.costoEnvio,
     });
+    this.pedidosGateway.notificarCambioPedidos('repartidor-asignado', id);
     return actualizado;
   }
 }

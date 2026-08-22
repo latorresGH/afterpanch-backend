@@ -75,6 +75,58 @@ export class CajaService {
     });
   }
 
+  /**
+   * Confirma el cobro de varios pedidos de una.
+   *
+   * Cada pedido va en SU PROPIA transacción (reusando `registrarPagoPedido`),
+   * no en una sola global: si uno está cancelado o ya tenía movimiento, no
+   * tiene por qué tumbar a los otros cuatro. Por eso reporta éxito parcial en
+   * vez de tirar.
+   *
+   * Confirma todos sin distinción, con el `costoEnvio` que cada pedido tenga
+   * en ese momento —incluso 0—, que es el valor que `registrarPagoPedido`
+   * toma por defecto como ganancia del repartidor.
+   *
+   * Secuencial a propósito: en paralelo serían N transacciones simultáneas
+   * compitiendo por el pool de conexiones, para un lote que como mucho tiene
+   * unas pocas decenas de pedidos.
+   */
+  async confirmarLote(pedidoIds: string[], confirmadoPor: string) {
+    const confirmados: Array<{
+      pedidoId: string;
+      movimientoId: string;
+      monto: number;
+    }> = [];
+    const fallidos: Array<{ pedidoId: string; motivo: string }> = [];
+
+    // Sin duplicados: si llega el mismo id dos veces, el segundo fallaría con
+    // "ya tiene un movimiento" y ensuciaría el reporte.
+    for (const pedidoId of [...new Set(pedidoIds)]) {
+      try {
+        const movimiento = await this.registrarPagoPedido(
+          pedidoId,
+          confirmadoPor,
+        );
+        confirmados.push({
+          pedidoId,
+          movimientoId: movimiento.id,
+          monto: movimiento.montoTotal,
+        });
+      } catch (error: any) {
+        fallidos.push({
+          pedidoId,
+          motivo: error?.message ?? 'Error desconocido',
+        });
+      }
+    }
+
+    return {
+      confirmados,
+      fallidos,
+      totalConfirmado: confirmados.reduce((acc, c) => acc + c.monto, 0),
+    };
+  }
+
   async registrarMovimientoManual(data: {
     tipo: TipoMovimientoCaja;
     monto: number;
@@ -93,6 +145,65 @@ export class CajaService {
         confirmadoPor,
         fechaConfirmacion: new Date(),
       },
+    });
+  }
+
+  /**
+   * Resumen de caja de un rango, resuelto con `aggregate` en Postgres.
+   *
+   * `obtenerResumenCaja` hace `findMany` + `reduce` en JS: se trae TODOS los
+   * movimientos con el pedido joineado solo para sumar cuatro números. Acá no
+   * viaja ninguna fila: la base devuelve los totales ya calculados.
+   * (No se tocó el método viejo: lo usan la pantalla de caja y el hook actual.)
+   */
+  async getResumenAgregado(inicio: Date, fin: Date) {
+    const rango = { fechaConfirmacion: { gte: inicio, lte: fin } };
+
+    const [entradas, salidas] = await Promise.all([
+      this.prisma.cajaMovimiento.aggregate({
+        where: { ...rango, tipo: TipoMovimientoCaja.ENTRADA },
+        _sum: { montoTotal: true },
+        _count: { _all: true },
+      }),
+      this.prisma.cajaMovimiento.aggregate({
+        where: { ...rango, tipo: TipoMovimientoCaja.SALIDA },
+        _sum: { montoTotal: true },
+      }),
+    ]);
+
+    const cobrado = entradas._sum.montoTotal ?? 0;
+    const totalSalidas = salidas._sum.montoTotal ?? 0;
+    const ticketsCerrados = entradas._count._all;
+
+    return {
+      cobrado,
+      entradas: cobrado,
+      salidas: totalSalidas,
+      balance: cobrado - totalSalidas,
+      ticketsCerrados,
+      ticketPromedio: ticketsCerrados > 0 ? Math.round(cobrado / ticketsCerrados) : 0,
+    };
+  }
+
+  /**
+   * Movimientos de un rango, para la lista del Home. Acotado por fecha (un
+   * día), así que no necesita paginar: no crece con el histórico.
+   */
+  async getMovimientosDelRango(inicio: Date, fin: Date) {
+    return this.prisma.cajaMovimiento.findMany({
+      where: { fechaConfirmacion: { gte: inicio, lte: fin } },
+      select: {
+        id: true,
+        tipo: true,
+        montoTotal: true,
+        descripcion: true,
+        confirmadoPor: true,
+        fechaConfirmacion: true,
+        pedido: {
+          select: { id: true, nombreCliente: true, apellidoCliente: true },
+        },
+      },
+      orderBy: { fechaConfirmacion: 'desc' },
     });
   }
 

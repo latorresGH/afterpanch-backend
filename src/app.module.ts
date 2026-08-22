@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { InsumosModule } from './insumos/insumos.module';
 import { ProductosModule } from './productos/productos.module';
 import { PedidosModule } from './pedidos/pedidos.module';
+import { HomeModule } from './home/home.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ConfigModule } from '@nestjs/config';
 import { CategoriasModule } from './categorias/categorias.module';
@@ -57,6 +58,7 @@ function validateEnv(config: Record<string, string>) {
     AuthModule,
     UsersModule,
     PedidosModule,
+    HomeModule,
     PrismaModule,
     CategoriasModule,
     ProveedoresModule,

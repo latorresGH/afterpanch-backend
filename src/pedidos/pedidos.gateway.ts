@@ -40,6 +40,42 @@ export interface UsuarioSocket {
   nombre: string;
 }
 
+/**
+ * 🔎 DIAGNÓSTICO TEMPORAL — grepear por `[WS-DIAG]`.
+ *
+ * Motivo concreto por el que un handshake quedó sin usuario. Hoy
+ * `resolverUsuarioDelHandshake` colapsa cinco causas muy distintas en el mismo
+ * `null`, y desde afuera no hay forma de saber cuál fue: el frontend recibe
+ * siempre `SESION_INVALIDA`. Esto NO cambia esa lógica, solo la etiqueta para
+ * poder leerla en los logs de producción.
+ *
+ * Se puede borrar entero junto con los `console.log('[WS-DIAG]', ...)` cuando
+ * la causa esté confirmada.
+ */
+type MotivoSinUsuario =
+  | 'SIN_COOKIE_HEADER' // el handshake no trajo ningún header `cookie`
+  | 'COOKIE_ILEGIBLE' // vino el header pero `parseCookie` tiró
+  | 'SIN_COOKIE_AUTH' // vinieron cookies, pero no `afterpanch_token`
+  | 'JWT_INVALIDO' // llegó el token pero no verifica (firma/expiración)
+  | 'USUARIO_INVALIDO'; // JWT válido, pero el usuario no existe o está inactivo
+
+/** Resultado del handshake: el usuario de siempre + la etiqueta de diagnóstico. */
+interface ResultadoHandshake {
+  user: UsuarioSocket | null;
+  motivo: MotivoSinUsuario | null;
+  /** Vino el header `cookie` (con lo que sea adentro). */
+  tieneCookieHeader: boolean;
+  /** Dentro de ese header estaba `afterpanch_token` específicamente. */
+  contieneAuthToken: boolean;
+  /**
+   * NOMBRES de las cookies que sí llegaron — nunca sus valores. Es el dato que
+   * separa las dos hipótesis: si llegaron otras cookies pero no la de auth, el
+   * problema es de scope (path/domain); si no llegó ninguna, es del transporte
+   * o del navegador.
+   */
+  cookiesPresentes: string[];
+}
+
 const ORIGENES_DEV = ['http://localhost:3000', 'http://127.0.0.1:3000'];
 
 /**
@@ -140,22 +176,96 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
       return;
     }
 
-    client.data.user = await this.resolverUsuarioDelHandshake(client);
+    const resultado = await this.resolverUsuarioDelHandshake(client);
+    client.data.user = resultado.user;
+
+    // 🔎 DIAGNÓSTICO TEMPORAL — grepear por `[WS-DIAG]`. Ver `MotivoSinUsuario`.
+    this.logDiagnostico(client, resultado);
+  }
+
+  /**
+   * 🔎 DIAGNÓSTICO TEMPORAL — grepear por `[WS-DIAG]`.
+   *
+   * Solo escribe logs: no toca `client.data`, no emite, no desconecta, no
+   * cambia ninguna decisión. Todo va con optional chaining y dentro de un
+   * try/catch porque un handshake raro (o un socket mockeado) no puede tumbar
+   * una conexión por culpa de una línea de diagnóstico.
+   *
+   * Nunca loguea el token ni el valor de ninguna cookie: solo presencia,
+   * ausencia y nombres.
+   */
+  private logDiagnostico(client: Socket, resultado: ResultadoHandshake) {
+    try {
+      const handshake = client.handshake as Socket['handshake'] | undefined;
+      const headers = handshake?.headers ?? {};
+
+      const contexto = {
+        // `sid` + `t` son lo que permite cruzar esta línea con la de
+        // `[WS-DIAG] join-staff`: mismo socket, y el orden temporal exacto
+        // entre que terminó la auth del handshake y que llegó el join.
+        sid: client.id,
+        t: new Date().toISOString(),
+        // 🔑 La hipótesis del path se confirma o se cae acá: `url` es la ruta
+        // exacta del handshake (ej. `/socket.io/?EIO=4&transport=polling`).
+        // La cookie hoy se setea con `path: '/'`, que matchea cualquier ruta,
+        // así que si el path fuera el problema tendría que verse algo distinto
+        // de `/socket.io/` en esta línea.
+        path: handshake?.url,
+        transport: client.conn?.transport?.name,
+        origin: headers.origin,
+        host: headers.host,
+        // Relevante por el flag `secure` de la cookie: dice con qué esquema
+        // llegó la request del otro lado del Cloudflare Tunnel.
+        proto: headers['x-forwarded-proto'],
+      };
+
+      if (resultado.user) {
+        console.log('[WS-DIAG] handshake OK', {
+          ...contexto,
+          role: resultado.user.role,
+        });
+        return;
+      }
+
+      console.log('[WS-DIAG] handshake sin usuario', {
+        motivo: resultado.motivo,
+        tieneCookieHeader: resultado.tieneCookieHeader,
+        contieneAuthToken: resultado.contieneAuthToken,
+        cookiesPresentes: resultado.cookiesPresentes,
+        ...contexto,
+      });
+    } catch (e) {
+      console.log('[WS-DIAG] no se pudo loguear el handshake', e);
+    }
   }
 
   /**
    * Los mismos dos pasos que hacía `handleJoinStaff` con el token del body:
    * verificar la firma del JWT y revalidar contra la DB con
    * `JwtStrategy.validate` (usuario existente + activo), que es la misma
-   * comprobación que protege las rutas HTTP. Devuelve `null` ante cualquier
-   * fallo; no distingue el motivo a propósito.
+   * comprobación que protege las rutas HTTP. Devuelve `user: null` ante
+   * cualquier fallo, exactamente igual que antes.
+   *
+   * 🔎 Lo único que cambió: además del usuario devuelve el `motivo` del null.
+   * Es SOLO para el log de diagnóstico — ningún consumidor lo mira para
+   * decidir nada, `handleJoinStaff` sigue viendo el mismo `client.data.user`
+   * de siempre y sigue respondiendo el mismo `SESION_INVALIDA`.
    */
   private async resolverUsuarioDelHandshake(
     client: Socket,
-  ): Promise<UsuarioSocket | null> {
+  ): Promise<ResultadoHandshake> {
     const header = client.handshake.headers.cookie;
-    if (!header) return null;
+    if (!header) {
+      return {
+        user: null,
+        motivo: 'SIN_COOKIE_HEADER',
+        tieneCookieHeader: false,
+        contieneAuthToken: false,
+        cookiesPresentes: [],
+      };
+    }
 
+    let cookies: Record<string, string | undefined>;
     let token: string | undefined;
     try {
       // cookie-parser es middleware de Express y no corre para socket.io, así
@@ -167,17 +277,101 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
       // Ojo con el tipo: @types/cookie declara `Record<string, string>`, pero
       // si la cookie no vino el valor real en runtime es `undefined`. El
       // chequeo de abajo no es decorativo, es lo único que cubre ese caso.
-      token = parseCookie(header)[AUTH_COOKIE_NAME];
+      cookies = parseCookie(header);
+      token = cookies[AUTH_COOKIE_NAME];
     } catch {
-      return null;
+      return {
+        user: null,
+        motivo: 'COOKIE_ILEGIBLE',
+        tieneCookieHeader: true,
+        contieneAuthToken: false,
+        cookiesPresentes: [],
+      };
     }
-    if (!token) return null;
+
+    // Solo los NOMBRES, nunca los valores.
+    const cookiesPresentes = Object.keys(cookies);
+
+    if (!token) {
+      return {
+        user: null,
+        motivo: 'SIN_COOKIE_AUTH',
+        tieneCookieHeader: true,
+        contieneAuthToken: false,
+        cookiesPresentes,
+      };
+    }
+
+    // Los dos `await` van en try/catch separados solo para poder distinguir
+    // "el JWT no verifica" de "el usuario ya no sirve". Las llamadas, su orden
+    // y el resultado (`null` ante cualquier throw) son idénticos a antes.
+    let payload: unknown;
+    try {
+      payload = await this.jwtService.verifyAsync(token);
+    } catch {
+      return {
+        user: null,
+        motivo: 'JWT_INVALIDO',
+        tieneCookieHeader: true,
+        contieneAuthToken: true,
+        cookiesPresentes,
+      };
+    }
 
     try {
-      const payload = await this.jwtService.verifyAsync(token);
-      return (await this.jwtStrategy.validate(payload)) as UsuarioSocket;
+      const user = (await this.jwtStrategy.validate(payload)) as UsuarioSocket;
+      return {
+        user,
+        motivo: null,
+        tieneCookieHeader: true,
+        contieneAuthToken: true,
+        cookiesPresentes,
+      };
     } catch {
-      return null;
+      return {
+        user: null,
+        motivo: 'USUARIO_INVALIDO',
+        tieneCookieHeader: true,
+        contieneAuthToken: true,
+        cookiesPresentes,
+      };
+    }
+  }
+
+  /**
+   * 🔎 DIAGNÓSTICO TEMPORAL — grepear por `[WS-DIAG]`.
+   *
+   * Mide la carrera de timing. `handleConnection` es `async` y nadie la espera,
+   * y socket.io le manda el paquete CONNECT al cliente ANTES de invocarla, así
+   * que un `join-staff` puede llegar mientras la auth del handshake todavía
+   * está esperando a la DB. Desde `handleJoinStaff` los dos casos se ven igual
+   * (`client.data.user` falsy → SESION_INVALIDA), pero se distinguen así:
+   *
+   * - `authResuelta: false` → `handleConnection` NO terminó todavía. Es la
+   *   carrera: la cookie puede estar perfecta. La línea
+   *   `[WS-DIAG] handshake OK` del mismo `sid` va a aparecer DESPUÉS de esta.
+   * - `authResuelta: true` + `tieneUsuario: false` → la auth terminó y dio
+   *   null de verdad; el motivo está en `[WS-DIAG] handshake sin usuario`.
+   *
+   * Solo escribe logs: no toca `client.data`, no emite, no desconecta, no
+   * cambia ninguna decisión.
+   */
+  private logDiagnosticoJoinStaff(client: Socket) {
+    try {
+      const data = client.data as Record<string, unknown> | undefined;
+
+      console.log('[WS-DIAG] join-staff', {
+        sid: client.id,
+        t: new Date().toISOString(),
+        // La clave `user` solo existe una vez que `handleConnection` terminó
+        // de asignarla, así que su presencia es exactamente "la auth del
+        // handshake ya corrió". Es distinto de `tieneUsuario`.
+        authResuelta: !!data && 'user' in data,
+        tieneUsuario: !!data?.user,
+        transport: client.conn?.transport?.name,
+      });
+    } catch (e) {
+      console.log('[WS-DIAG] no se pudo loguear el join-staff', e);
     }
   }
 
@@ -188,6 +382,10 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
    */
   @SubscribeMessage('join-staff')
   handleJoinStaff(@ConnectedSocket() client: Socket) {
+    // 🔎 DIAGNÓSTICO TEMPORAL — grepear por `[WS-DIAG]`. Solo log, va primero
+    // para que el timestamp sea el de la llegada del mensaje.
+    this.logDiagnosticoJoinStaff(client);
+
     const user: UsuarioSocket | null = client.data?.user ?? null;
 
     if (!user) {
@@ -256,6 +454,35 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
       total: Number(pedido.total),
       timestamp: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Ids (`sub`) del staff con una pantalla abierta ahora mismo.
+   *
+   * Sale de los sockets que están en la room `staff`, cada uno con su usuario
+   * ya resuelto en el handshake (`client.data.user`). Es SOLO LECTURA: no
+   * toca la autenticación ni las rooms.
+   *
+   * Tres límites, a tener presentes antes de leer esto como un fichaje:
+   * 1. "Conectado" significa que tiene abierta alguna pantalla con la
+   *    campanita (/pos, /admin, /caja, /cocina). Es un proxy de "está en
+   *    turno", no una marcación de entrada.
+   * 2. `fetchSockets()` mira SOLO este proceso. Con un contenedor alcanza; si
+   *    algún día hay varias instancias hace falta el adapter de Redis.
+   * 3. DELIVERY nunca aparece: solo ADMIN/TRABAJADOR entran a la room staff.
+   */
+  async getStaffConectados(): Promise<Set<string>> {
+    try {
+      const sockets = await this.server.in(ROOM_STAFF).fetchSockets();
+      const ids = sockets
+        .map((socket) => (socket.data as { user?: UsuarioSocket })?.user?.sub)
+        .filter((sub): sub is string => typeof sub === 'string');
+      return new Set(ids);
+    } catch {
+      // La presencia es decorativa: si el adapter falla, el Home tiene que
+      // seguir respondiendo, con todo el equipo mostrado como desconectado.
+      return new Set();
+    }
   }
 
   /**

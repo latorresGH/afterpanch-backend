@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EstadoPedido } from '@prisma/client';
-import { PedidosService, ESTADOS_MONITOR } from './pedidos.service';
+import {
+  PedidosService,
+  ESTADOS_MONITOR,
+  MINUTOS_PEDIDO_DEMORADO,
+} from './pedidos.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OfertasCalculatorService } from '../ofertas/ofertas-calculator.service';
 import { NegocioConfigService } from '../config/config.service';
@@ -137,6 +141,26 @@ describe('GET /pedidos/activos — listarActivos', () => {
       expect(select.movimientosCaja).toBeUndefined();
     });
 
+    it('NO cambia la forma de lo que ya leía /pos/monitor', async () => {
+      // Los campos derivados se AGREGAN: todo lo que el monitor ya usaba tiene
+      // que seguir llegando igual.
+      const original = {
+        id: 'p-1',
+        tipo: 'DELIVERY',
+        estado: 'EN_PREPARACION',
+        total: 34200,
+        costoEnvio: 3000,
+        createdAt: new Date(),
+        nombreCliente: 'Martina',
+        detalles: [{ id: 'd-1', cantidad: 2 }],
+      };
+      prisma.pedido.findMany.mockResolvedValue([original]);
+
+      const [pedido] = await service.listarActivos();
+
+      expect(pedido).toMatchObject(original);
+    });
+
     it('de producto y aderezos trae solo lo mínimo, no la fila entera', async () => {
       await service.listarActivos();
 
@@ -151,6 +175,73 @@ describe('GET /pedidos/activos — listarActivos', () => {
       expect(detalle.aderezos).toEqual({
         select: { id: true, nombre: true },
       });
+    });
+  });
+
+  describe('campos derivados (minutosTranscurridos / demorado)', () => {
+    const haceMinutos = (n: number) => new Date(Date.now() - n * 60_000);
+
+    it.each([
+      [0, false],
+      [1, false],
+      [29, false],
+      [30, true], // el umbral es inclusivo
+      [31, true],
+      [120, true],
+    ])(
+      'un pedido de hace %i min => demorado: %s',
+      async (minutos, esperado) => {
+        prisma.pedido.findMany.mockResolvedValue([
+          { id: 'p-1', createdAt: haceMinutos(minutos) },
+        ]);
+
+        const [pedido] = await service.listarActivos();
+
+        expect(pedido.minutosTranscurridos).toBe(minutos);
+        expect(pedido.demorado).toBe(esperado);
+      },
+    );
+
+    it('usa el umbral exportado, no un 30 suelto', () => {
+      expect(MINUTOS_PEDIDO_DEMORADO).toBe(30);
+    });
+
+    it('nunca devuelve minutos negativos', async () => {
+      // Reloj del cliente adelantado o createdAt en el futuro por skew.
+      prisma.pedido.findMany.mockResolvedValue([
+        { id: 'p-1', createdAt: new Date(Date.now() + 60_000) },
+      ]);
+
+      const [pedido] = await service.listarActivos();
+
+      expect(pedido.minutosTranscurridos).toBe(0);
+      expect(pedido.demorado).toBe(false);
+    });
+
+    it('no agrega ninguna query extra', async () => {
+      prisma.pedido.findMany.mockResolvedValue([
+        { id: 'p-1', createdAt: haceMinutos(10) },
+        { id: 'p-2', createdAt: haceMinutos(40) },
+      ]);
+
+      await service.listarActivos();
+
+      expect(prisma.pedido.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('usa el mismo instante para todo el lote', async () => {
+      // Dos pedidos creados a la vez tienen que dar el mismo número, sin que
+      // los milisegundos del recorrido los separen.
+      const mismoInstante = haceMinutos(29.999);
+      prisma.pedido.findMany.mockResolvedValue([
+        { id: 'p-1', createdAt: mismoInstante },
+        { id: 'p-2', createdAt: mismoInstante },
+      ]);
+
+      const [a, b] = await service.listarActivos();
+
+      expect(a.minutosTranscurridos).toBe(b.minutosTranscurridos);
+      expect(a.demorado).toBe(b.demorado);
     });
   });
 });

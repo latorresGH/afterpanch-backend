@@ -374,6 +374,63 @@ describe('PedidosGateway — auth por cookie en el handshake', () => {
       ]);
     });
 
+    it('getStaffConectados devuelve los sub de los sockets en la room staff', async () => {
+      const inRoom = jest.fn(() => ({
+        fetchSockets: jest.fn().mockResolvedValue([
+          { data: { user: { sub: 'u-1' } } },
+          { data: { user: { sub: 'u-2' } } },
+        ]),
+      }));
+      gateway.server = { in: inRoom } as any;
+
+      const conectados = await gateway.getStaffConectados();
+
+      expect(inRoom).toHaveBeenCalledWith('staff');
+      expect([...conectados].sort()).toEqual(['u-1', 'u-2']);
+    });
+
+    it('getStaffConectados deduplica: una persona con dos pantallas abiertas cuenta una vez', async () => {
+      gateway.server = {
+        in: () => ({
+          fetchSockets: jest.fn().mockResolvedValue([
+            { data: { user: { sub: 'u-1' } } },
+            { data: { user: { sub: 'u-1' } } },
+          ]),
+        }),
+      } as any;
+
+      const conectados = await gateway.getStaffConectados();
+
+      expect(conectados.size).toBe(1);
+    });
+
+    it('getStaffConectados ignora sockets sin usuario resuelto', async () => {
+      gateway.server = {
+        in: () => ({
+          fetchSockets: jest.fn().mockResolvedValue([
+            { data: {} },
+            { data: { user: undefined } },
+            { data: { user: { sub: 'u-1' } } },
+          ]),
+        }),
+      } as any;
+
+      await expect(gateway.getStaffConectados()).resolves.toEqual(
+        new Set(['u-1']),
+      );
+    });
+
+    it('getStaffConectados no rompe el Home si el adapter falla', async () => {
+      gateway.server = {
+        in: () => ({
+          fetchSockets: jest.fn().mockRejectedValue(new Error('adapter caído')),
+        }),
+      } as any;
+
+      // La presencia es decorativa: el Home tiene que responder igual.
+      await expect(gateway.getStaffConectados()).resolves.toEqual(new Set());
+    });
+
     it('notificarActualizacionPedido sigue yendo SOLO a la room del pedido', () => {
       // El tracking público no debe recibir el evento de staff ni al revés.
       const emit = jest.fn();

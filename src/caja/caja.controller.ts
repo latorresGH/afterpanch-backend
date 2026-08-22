@@ -5,6 +5,7 @@ import {
   Param,
   Body,
   Query,
+  Request,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -19,6 +20,7 @@ import {
   ConfirmarPagoDto,
   MovimientoManualDto,
 } from './dto/confirmar-pago.dto';
+import { ConfirmarLoteDto } from './dto/confirmar-lote.dto';
 
 @ApiTags('Caja')
 @ApiBearerAuth()
@@ -45,6 +47,20 @@ export class CajaController {
       dto.confirmadoPor,
       dto.gananciaRepartidor,
     );
+  }
+
+  @Post('confirmar-lote')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Confirmar el cobro de varios pedidos',
+    description:
+      'Confirma en lote (máx 50). Cada pedido va en su propia transacción: ' +
+      'devuelve éxito parcial con los que fallaron y por qué, en vez de ' +
+      'abortar todo. `confirmadoPor` sale del JWT, no del body.',
+  })
+  @ApiResponse({ status: 201, description: 'Lote procesado (puede tener fallidos)' })
+  confirmarLote(@Body() dto: ConfirmarLoteDto, @Request() req: any) {
+    return this.cajaService.confirmarLote(dto.pedidoIds, req.user.nombre);
   }
 
   @Post('movimiento')

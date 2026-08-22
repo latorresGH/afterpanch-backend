@@ -13,7 +13,14 @@ import {
   Role,
   MetodoPago,
   TipoOferta,
+  TipoMovimientoCaja,
 } from '@prisma/client';
+import {
+  ZONA_HORARIA_NEGOCIO,
+  claveFecha,
+  codigoPedido,
+  inicioVentanaDias,
+} from '../common/helpers/fecha.helper';
 import { OfertasCalculatorService } from '../ofertas/ofertas-calculator.service';
 import { NegocioConfigService } from '../config/config.service';
 import { PedidosGateway } from './pedidos.gateway';
@@ -47,6 +54,15 @@ const ESTADOS_CERRADOS: EstadoPedido[] = [
 export const ESTADOS_MONITOR: EstadoPedido[] = Object.values(
   EstadoPedido,
 ).filter((estado) => !ESTADOS_CERRADOS.includes(estado));
+
+/** A partir de estos minutos sin cerrarse, un pedido se marca como demorado. */
+export const MINUTOS_PEDIDO_DEMORADO = 30;
+
+/** Minutos enteros transcurridos desde `desde` hasta ahora (nunca negativo). */
+export function minutosDesde(desde: Date, ahora: Date = new Date()): number {
+  const ms = ahora.getTime() - new Date(desde).getTime();
+  return Math.max(0, Math.floor(ms / 60_000));
+}
 
 const TRANSICIONES_VALIDAS: Record<EstadoPedido, EstadoPedido[]> = {
   [EstadoPedido.PENDIENTE]: [EstadoPedido.EN_PREPARACION, EstadoPedido.CANCELADO],
@@ -1112,9 +1128,13 @@ export class PedidosService {
    * Se excluyen a propósito: `movimientosCaja` (el monitor no los muestra),
    * el objeto `producto` entero (solo hace falta el nombre) y los campos de
    * geocoding/envío, que no se renderizan acá.
+   *
+   * Además de las columnas, cada fila lleva `minutosTranscurridos` y
+   * `demorado`, derivados en el server (ver abajo). Son campos AGREGADOS: no
+   * cambian nada de lo que /pos/monitor ya leía.
    */
   async listarActivos() {
-    return this.prisma.pedido.findMany({
+    const pedidos = await this.prisma.pedido.findMany({
       where: { estado: { in: ESTADOS_MONITOR } },
       select: {
         id: true,
@@ -1151,6 +1171,167 @@ export class PedidosService {
       // lo que hay que despachar). Se ordena acá para que llegue listo.
       orderBy: { createdAt: 'asc' },
     });
+
+    // Campos derivados, calculados por fila sobre lo ya traído: no agregan
+    // ninguna query. Se resuelven acá y no en el cliente para que las dos
+    // pantallas que los consumen (monitor y Home) usen el mismo criterio de
+    // "demorado" y el mismo reloj: el del servidor.
+    //
+    // Se toma UN `ahora` para todo el lote, así dos pedidos creados en el
+    // mismo instante no difieren por los milisegundos del recorrido.
+    const ahora = new Date();
+    return pedidos.map((pedido) => {
+      const minutosTranscurridos = minutosDesde(pedido.createdAt, ahora);
+      return {
+        ...pedido,
+        minutosTranscurridos,
+        demorado: minutosTranscurridos >= MINUTOS_PEDIDO_DEMORADO,
+      };
+    });
+  }
+
+  /**
+   * Plata ya facturada que todavía no entró a caja.
+   *
+   * Es un `aggregate` con filtro por relación: Prisma soporta `movimientosCaja:
+   * { none: ... }` dentro del `where` de un aggregate, así que la suma la hace
+   * Postgres y no viaja ninguna fila. La regla ("no cancelado y sin ENTRADA en
+   * caja") es la misma que la pantalla de Caja aplica hoy en el cliente.
+   */
+  async getPendienteCobro() {
+    const { _sum } = await this.prisma.pedido.aggregate({
+      where: {
+        estado: { not: EstadoPedido.CANCELADO },
+        movimientosCaja: { none: { tipo: TipoMovimientoCaja.ENTRADA } },
+      },
+      _sum: { total: true, costoEnvio: true },
+    });
+
+    return (_sum.total ?? 0) + (_sum.costoEnvio ?? 0);
+  }
+
+  /**
+   * Pedidos DELIVERY con plata sin confirmar. Devuelve los totales reales del
+   * conjunto (para el contador y el botón "Confirmar todos") pero solo las
+   * primeras `limite` filas, que son las que se muestran en la grilla.
+   */
+  async getDeliveryPendientesConfirmar(limite = 3) {
+    const where = {
+      tipo: TipoPedidoDto.DELIVERY,
+      estado: { not: EstadoPedido.CANCELADO },
+      movimientosCaja: { none: { tipo: TipoMovimientoCaja.ENTRADA } },
+    };
+
+    const [agregado, items] = await Promise.all([
+      this.prisma.pedido.aggregate({
+        where,
+        _count: { _all: true },
+        _sum: { total: true, costoEnvio: true },
+      }),
+      this.prisma.pedido.findMany({
+        where,
+        select: {
+          id: true,
+          estado: true,
+          total: true,
+          costoEnvio: true,
+          createdAt: true,
+          nombreCliente: true,
+          apellidoCliente: true,
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limite,
+      }),
+    ]);
+
+    return {
+      total: agregado._count._all,
+      montoTotal: (agregado._sum.total ?? 0) + (agregado._sum.costoEnvio ?? 0),
+      items: items.map((p) => ({
+        ...p,
+        codigo: codigoPedido(p.id),
+        montoAConfirmar: (p.total ?? 0) + (p.costoEnvio ?? 0),
+      })),
+    };
+  }
+
+  /**
+   * Facturación por día de los últimos `dias`, para el gráfico del Home.
+   *
+   * Va en `$queryRaw` porque `groupBy` de Prisma solo agrupa por columnas
+   * enteras, y acá hace falta truncar el timestamp al día. `createdAt` es
+   * `TIMESTAMP(3)` sin zona guardando UTC (convención de Prisma), así que se
+   * lo reinterpreta como UTC y recién ahí se pasa a hora local: sin ese doble
+   * `AT TIME ZONE`, los pedidos de la madrugada caerían en el día anterior.
+   *
+   * Los días sin ventas no vuelven de la query; se rellenan con 0 acá para que
+   * el gráfico no se deforme.
+   *
+   * El día vuelve ya formateado como texto (`to_char`) y no como timestamp a
+   * propósito: `date_trunc` devuelve `timestamp without time zone`, y el
+   * driver lo hidrata como `Date` interpretándolo en UTC. En un server en
+   * UTC-3 eso convertía el 11/07 00:00 local en el 10/07 21:00, la clave del
+   * Map caía en el día anterior y NINGUNA fila matcheaba contra las claves
+   * que arma el relleno de abajo: el gráfico salía en cero aunque hubiera
+   * ventas. Con `to_char` no hay Date de por medio y no hay nada que se corra.
+   */
+  async getFacturacionPorDia(dias = 7, ahora: Date = new Date()) {
+    const inicio = inicioVentanaDias(dias, ahora);
+
+    const filas = await this.prisma.$queryRaw<
+      Array<{ dia: string; monto: number | null; pedidos: bigint }>
+    >`
+      SELECT
+        to_char(
+          date_trunc(
+            'day',
+            ("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${ZONA_HORARIA_NEGOCIO}
+          ),
+          'YYYY-MM-DD'
+        ) AS dia,
+        SUM("total" + "costoEnvio") AS monto,
+        COUNT(*) AS pedidos
+      FROM "Pedido"
+      WHERE "estado" = 'ENTREGADO'
+        AND "createdAt" >= ${inicio}
+      GROUP BY dia
+      ORDER BY dia ASC
+    `;
+
+    const porDia = new Map(
+      filas.map((f) => [
+        f.dia,
+        { monto: Number(f.monto ?? 0), pedidos: Number(f.pedidos) },
+      ]),
+    );
+
+    const resultado: Array<{
+      fecha: string;
+      label: string;
+      monto: number;
+      pedidos: number;
+    }> = [];
+
+    for (let i = 0; i < dias; i++) {
+      const fecha = new Date(inicio);
+      fecha.setDate(inicio.getDate() + i);
+      const clave = claveFecha(fecha);
+      const datos = porDia.get(clave) ?? { monto: 0, pedidos: 0 };
+      resultado.push({
+        fecha: clave,
+        label: fecha
+          .toLocaleDateString('es-AR', { weekday: 'short' })
+          .replace('.', ''),
+        monto: datos.monto,
+        pedidos: datos.pedidos,
+      });
+    }
+
+    return {
+      dias: resultado,
+      total: resultado.reduce((acc, d) => acc + d.monto, 0),
+      max: Math.max(...resultado.map((d) => d.monto), 0),
+    };
   }
 
   async listarDeliveryPendientes() {

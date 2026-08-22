@@ -11,5 +11,7 @@ import { UsersModule } from '../users/users.module';
   imports: [OfertasModule, NegocioConfigModule, AuthModule, UsersModule],
   controllers: [PedidosController],
   providers: [PedidosService, PedidosGateway],
+  // Los consume HomeModule (GET /admin/home).
+  exports: [PedidosService, PedidosGateway],
 })
 export class PedidosModule {}

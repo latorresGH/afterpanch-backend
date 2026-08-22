@@ -75,6 +75,7 @@ export class UsersService {
         nombre: true,
         role: true,
         activo: true,
+        bienvenidaVista: true,
         createdAt: true,
       },
     });
@@ -96,6 +97,23 @@ export class UsersService {
     return this.prisma.user.findUnique({ where: { email: normalized } });
   }
 
+  /**
+   * Marca el splash de bienvenida como visto. Idempotente: si ya estaba en
+   * true, el update es un no-op y devuelve lo mismo.
+   *
+   * Lo llama el frontend cuando TERMINA la animación, no el SSR que la sirve:
+   * si lo marcara el GET del Home, un prefetch de /admin consumiría el flag
+   * sin que el usuario llegara a ver nada.
+   */
+  async marcarBienvenidaVista(id: string) {
+    await this.ensureExists(id);
+    return this.prisma.user.update({
+      where: { id },
+      data: { bienvenidaVista: true },
+      select: { id: true, bienvenidaVista: true },
+    });
+  }
+
   async findByRole(role: Role) {
     return this.prisma.user.findMany({
       where: { role },
@@ -107,6 +125,22 @@ export class UsersService {
         activo: true,
         createdAt: true,
       },
+      orderBy: { nombre: 'asc' },
+    });
+  }
+
+  /**
+   * Staff operativo para el bloque "Equipo" del Home: ADMIN y TRABAJADOR
+   * habilitados. DELIVERY queda afuera a propósito (no entra a la room de
+   * staff del WebSocket, así que nunca podría figurar como conectado).
+   */
+  async findStaffOperativo() {
+    return this.prisma.user.findMany({
+      where: {
+        activo: true,
+        role: { in: [Role.ADMIN, Role.TRABAJADOR] },
+      },
+      select: { id: true, nombre: true, role: true },
       orderBy: { nombre: 'asc' },
     });
   }

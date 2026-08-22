@@ -103,7 +103,10 @@ export class PedidosController {
     description:
       'Pedidos que todavía se están trabajando (todos menos ENTREGADO y ' +
       'CANCELADO), con solo los campos que el monitor renderiza. Payload ' +
-      'acotado: no crece con el histórico, a diferencia de GET /pedidos.',
+      'acotado: no crece con el histórico, a diferencia de GET /pedidos. ' +
+      'Cada pedido incluye `minutosTranscurridos` y `demorado` (>= 30 min) ' +
+      'ya calculados con el reloj del servidor. Lo consumen /pos/monitor y ' +
+      'el bloque de pedidos abiertos del Home admin.',
   })
   listarActivos() {
     return this.pedidosService.listarActivos();

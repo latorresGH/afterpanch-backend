@@ -1,6 +1,10 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+/** Mendoza. El servidor corre en TZ de Buenos Aires: mismo offset, pero se
+ *  deja explícito para no depender de que coincidan. */
+const ZONA_HORARIA = 'America/Argentina/Mendoza';
+
 @Injectable()
 export class NegocioConfigService implements OnModuleInit {
   constructor(private prisma: PrismaService) {}
@@ -14,6 +18,62 @@ export class NegocioConfigService implements OnModuleInit {
       where: { clave },
     });
     return config?.valor || null;
+  }
+
+  /**
+   * ¿El local está abierto ahora, según el horario configurado?
+   *
+   * Vivía en el controller (con 9 console.log por request). Se movió acá para
+   * que el Home admin pueda reusar el MISMO cálculo en vez de repetirlo, y de
+   * paso para que sea testeable sin levantar HTTP.
+   *
+   * Si falta alguno de los dos horarios se asume abierto: es preferible dejar
+   * entrar un pedido de más a cerrar el local por una config incompleta.
+   */
+  async estaAbierto(ahora: Date = new Date()) {
+    const [horaAperturaStr, horaCierreStr] = await Promise.all([
+      this.obtener('hora_apertura'),
+      this.obtener('hora_cierre'),
+    ]);
+
+    if (!horaAperturaStr || !horaCierreStr) {
+      return {
+        abierto: true,
+        horaApertura: null,
+        horaCierre: null,
+        horaActual: null,
+      };
+    }
+
+    const horaActualStr = ahora.toLocaleTimeString('es-AR', {
+      timeZone: ZONA_HORARIA,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+
+    const aMinutos = (hhmm: string) => {
+      const [h, m] = hhmm.split(':').map(Number);
+      return h * 60 + (m || 0);
+    };
+
+    const actual = aMinutos(horaActualStr);
+    const apertura = aMinutos(horaAperturaStr);
+    const cierre = aMinutos(horaCierreStr);
+
+    // El local abre 21:00 y cierra 23:30, pero también hay after de 05 a 08:
+    // cuando el cierre es "menor" que la apertura, el turno cruza medianoche.
+    const cruzaMedianoche = cierre < apertura;
+    const abierto = cruzaMedianoche
+      ? actual >= apertura || actual < cierre
+      : actual >= apertura && actual < cierre;
+
+    return {
+      abierto,
+      horaApertura: horaAperturaStr,
+      horaCierre: horaCierreStr,
+      horaActual: horaActualStr,
+    };
   }
 
   async obtenerTodas() {

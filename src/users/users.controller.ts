@@ -3,9 +3,11 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
+  Request,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -18,6 +20,21 @@ import { Public } from 'src/auth/public.decorator';
 @Controller('users')
 export class UsersController {
   constructor(private users: UsersService) {}
+
+  /**
+   * Marca visto el splash de bienvenida del Home admin.
+   *
+   * Va ANTES de @Get(':id')/@Patch(':id') por el orden de resolución de rutas
+   * de Nest. El id sale del JWT, nunca del body: cada uno solo puede marcar el
+   * suyo. Sobreescribe el @Roles(ADMIN) del controller porque el splash
+   * podría mostrarse a cualquier rol autenticado más adelante.
+   */
+  @Post('me/bienvenida-vista')
+  @Roles(Role.ADMIN, Role.TRABAJADOR, Role.DELIVERY, Role.CLIENTE)
+  @HttpCode(200)
+  marcarBienvenidaVista(@Request() req: any) {
+    return this.users.marcarBienvenidaVista(req.user.sub);
+  }
 
   @Post()
   create(@Body() dto: CreateUserDto) {

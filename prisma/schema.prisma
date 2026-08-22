@@ -26,6 +26,13 @@ model User {
   activo    Boolean  @default(true)
   pedidos   Pedido[] @relation("RepartidorPedidos") // Para el rol DELIVERY
   createdAt DateTime @default(now())
+
+  // El splash "Bienvenido {nombre}" del Home admin se muestra una sola vez.
+  // Arranca en false para todos (los usuarios existentes lo ven una vez) y lo
+  // marca POST /users/me/bienvenida-vista cuando TERMINA la animación, no el
+  // SSR que la sirve: si lo marcara el GET, un prefetch de /admin consumiría
+  // el flag sin que nadie llegara a ver el splash.
+  bienvenidaVista Boolean @default(false)
 }
 
 // --- GESTIÓN DE STOCK (INSUMOS) ---

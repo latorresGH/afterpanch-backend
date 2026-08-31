@@ -19,6 +19,7 @@ import {
   ZONA_HORARIA_NEGOCIO,
   claveFecha,
   codigoPedido,
+  finDelDia,
   inicioVentanaDias,
 } from '../common/helpers/fecha.helper';
 import { OfertasCalculatorService } from '../ofertas/ofertas-calculator.service';
@@ -1276,10 +1277,33 @@ export class PedidosService {
    * ventas. Con `to_char` no hay Date de por medio y no hay nada que se corra.
    */
   async getFacturacionPorDia(dias = 7, ahora: Date = new Date()) {
-    const inicio = inicioVentanaDias(dias, ahora);
+    return this.getFacturacionPorRango(
+      inicioVentanaDias(dias, ahora),
+      finDelDia(ahora),
+    );
+  }
 
+  /**
+   * La misma serie diaria, pero sobre un rango arbitrario.
+   *
+   * Es la generalización de `getFacturacionPorDia`, que ahora delega acá: el
+   * Home pide una ventana de N días que termina hoy y la sección de
+   * Estadísticas pide el rango que el usuario haya elegido. La query y el
+   * relleno son los mismos, así que no hay dos SQL que puedan divergir.
+   *
+   * Además de `monto` (productos + envío) devuelve el corte en `negocio` y
+   * `delivery`, que es lo que el tooltip del gráfico de stats muestra. Son
+   * campos AGREGADOS: el Home sigue leyendo `monto` y `pedidos` igual que antes.
+   */
+  async getFacturacionPorRango(inicio: Date, fin: Date) {
     const filas = await this.prisma.$queryRaw<
-      Array<{ dia: string; monto: number | null; pedidos: bigint }>
+      Array<{
+        dia: string;
+        monto: number | null;
+        negocio: number | null;
+        delivery: number | null;
+        pedidos: bigint;
+      }>
     >`
       SELECT
         to_char(
@@ -1290,10 +1314,13 @@ export class PedidosService {
           'YYYY-MM-DD'
         ) AS dia,
         SUM("total" + "costoEnvio") AS monto,
+        SUM("total") AS negocio,
+        SUM("costoEnvio") AS delivery,
         COUNT(*) AS pedidos
       FROM "Pedido"
       WHERE "estado" = 'ENTREGADO'
         AND "createdAt" >= ${inicio}
+        AND "createdAt" <= ${fin}
       GROUP BY dia
       ORDER BY dia ASC
     `;
@@ -1301,30 +1328,45 @@ export class PedidosService {
     const porDia = new Map(
       filas.map((f) => [
         f.dia,
-        { monto: Number(f.monto ?? 0), pedidos: Number(f.pedidos) },
+        {
+          monto: Number(f.monto ?? 0),
+          negocio: Number(f.negocio ?? 0),
+          delivery: Number(f.delivery ?? 0),
+          pedidos: Number(f.pedidos ?? 0),
+        },
       ]),
     );
 
     const resultado: Array<{
       fecha: string;
       label: string;
+      labelFecha: string;
       monto: number;
+      negocio: number;
+      delivery: number;
       pedidos: number;
     }> = [];
 
-    for (let i = 0; i < dias; i++) {
-      const fecha = new Date(inicio);
-      fecha.setDate(inicio.getDate() + i);
-      const clave = claveFecha(fecha);
-      const datos = porDia.get(clave) ?? { monto: 0, pedidos: 0 };
+    const VACIO = { monto: 0, negocio: 0, delivery: 0, pedidos: 0 };
+    const cursor = new Date(inicio);
+    cursor.setHours(0, 0, 0, 0);
+
+    // Se avanza por fecha calendario, no sumando 24h: así el relleno no se
+    // corre si alguna vez el rango cruza un cambio de horario.
+    while (cursor.getTime() <= fin.getTime()) {
+      const clave = claveFecha(cursor);
+      const datos = porDia.get(clave) ?? VACIO;
       resultado.push({
         fecha: clave,
-        label: fecha
+        label: cursor
           .toLocaleDateString('es-AR', { weekday: 'short' })
           .replace('.', ''),
-        monto: datos.monto,
-        pedidos: datos.pedidos,
+        // El nombre del día alcanza para una semana; en 30 días se repite
+        // cuatro veces, así que el gráfico largo etiqueta con la fecha.
+        labelFecha: `${cursor.getDate()}/${cursor.getMonth() + 1}`,
+        ...datos,
       });
+      cursor.setDate(cursor.getDate() + 1);
     }
 
     return {
@@ -1637,9 +1679,33 @@ export class PedidosService {
         if (detalle.producto.receta && detalle.producto.receta.length > 0) {
           for (const recetaItem of detalle.producto.receta) {
             const cantidadRestaurar = recetaItem.cantidad * detalle.cantidad;
+
+            // El stock de ANTES se lee antes del increment, igual que en los
+            // bloques de extras y aderezos de acá arriba.
+            const insumo = await tx.insumo.findUnique({
+              where: { id: recetaItem.insumoId },
+              select: { stockActual: true, nombre: true, unidadMedida: true },
+            });
+            const stockAntes = Number(insumo?.stockActual ?? 0);
+
             await tx.insumo.update({
               where: { id: recetaItem.insumoId },
               data: { stockActual: { increment: cantidadRestaurar } },
+            });
+
+            // Faltaba SOLO este registro: la reposición se hacía pero no
+            // dejaba rastro, así que el historial del insumo mostraba el
+            // descuento del pedido y nunca la devolución al cancelarlo.
+            await tx.stockMovimiento.create({
+              data: {
+                insumoId: recetaItem.insumoId,
+                tipo: 'REPOSICION',
+                cantidad: cantidadRestaurar,
+                stockAntes,
+                stockDespues: stockAntes + cantidadRestaurar,
+                pedidoId: id,
+                motivo: `Cancelación pedido: reposición insumo ${insumo?.nombre} (${recetaItem.cantidad}${insumo?.unidadMedida || 'un'} x ${detalle.cantidad})`,
+              },
             });
           }
         }

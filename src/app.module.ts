@@ -5,6 +5,7 @@ import { InsumosModule } from './insumos/insumos.module';
 import { ProductosModule } from './productos/productos.module';
 import { PedidosModule } from './pedidos/pedidos.module';
 import { HomeModule } from './home/home.module';
+import { StatsModule } from './stats/stats.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ConfigModule } from '@nestjs/config';
 import { CategoriasModule } from './categorias/categorias.module';
@@ -21,6 +22,7 @@ import { NegocioConfigModule } from './config/config.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { HealthModule } from './health/health.module';
 import { BarriosModule } from './barrios/barrios.module';
+import { TelemetryModule } from './telemetry/telemetry.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -59,6 +61,7 @@ function validateEnv(config: Record<string, string>) {
     UsersModule,
     PedidosModule,
     HomeModule,
+    StatsModule,
     PrismaModule,
     CategoriasModule,
     ProveedoresModule,
@@ -70,6 +73,7 @@ function validateEnv(config: Record<string, string>) {
     ShippingModule,
     HealthModule,
     BarriosModule,
+    TelemetryModule,
   ],
   controllers: [AppController],
   providers: [

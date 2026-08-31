@@ -17,8 +17,9 @@ export class HomeController {
     description:
       'Compone en una sola request todo lo que muestra el Home: bienvenida, ' +
       'estado del local, caja de hoy, pedidos abiertos, delivery pendiente de ' +
-      'confirmar, equipo con presencia, facturacion de la semana y ' +
-      'movimientos del dia. Todos los totales vienen ya calculados.',
+      'confirmar, equipo con presencia, facturacion de la semana, ' +
+      'movimientos del dia y los avisos de cola/stock/oferta. Todos los ' +
+      'totales vienen ya calculados.',
   })
   @ApiResponse({ status: 200, description: 'Datos del Home' })
   getHome(@Request() req: any) {

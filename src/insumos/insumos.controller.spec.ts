@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { InsumosController } from './insumos.controller';
 import { InsumosService } from './insumos.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AdminInsumosService } from './admin-insumos.service';
 
 describe('InsumosController', () => {
   let controller: InsumosController;
@@ -12,6 +13,7 @@ describe('InsumosController', () => {
       providers: [
         InsumosService,
         { provide: PrismaService, useValue: {} },
+        { provide: AdminInsumosService, useValue: {} },
       ],
     }).compile();
 

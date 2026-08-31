@@ -102,11 +102,12 @@ export class NegocioConfigService implements OnModuleInit {
         valor: '',
         descripcion: 'Número de WhatsApp para contacto (con código de país)',
       },
-      {
-        clave: 'stock_bajo_umbral',
-        valor: '10',
-        descripcion: 'Umbral de stock bajo para advertencias',
-      },
+      // 'stock_bajo_umbral' se ELIMINÓ: el umbral de stock bajo pasó a ser
+      // por insumo ("Insumo"."stockMinimo"). Un insumo del que se venden 60
+      // unidades por día y otro del que se usan 2 no pueden compartir umbral.
+      // La migración 20260826020000_stock_minimo_por_insumo hace el backfill y
+      // borra la clave; si se volviera a sembrar acá, la próxima llamada a
+      // inicializarPorDefecto la resucitaría.
       {
         clave: 'delivery_precio_base',
         valor: '3000',

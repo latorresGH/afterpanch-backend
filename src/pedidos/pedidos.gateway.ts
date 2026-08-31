@@ -3,7 +3,6 @@ import {
   WebSocketGateway,
   WebSocketServer,
   OnGatewayInit,
-  OnGatewayConnection,
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
@@ -49,8 +48,11 @@ export interface UsuarioSocket {
  * siempre `SESION_INVALIDA`. Esto NO cambia esa lógica, solo la etiqueta para
  * poder leerla en los logs de producción.
  *
- * Se puede borrar entero junto con los `console.log('[WS-DIAG]', ...)` cuando
- * la causa esté confirmada.
+ * TODO [WS-DIAG]: borrar este andamiaje entero (`MotivoSinUsuario`,
+ * `ResultadoHandshake`, `logDiagnostico` y `logDiagnosticoJoinStaff`) junto
+ * con sus `console.log('[WS-DIAG]', ...)` cuando prod acumule ~1 semana sin
+ * una sola línea `authResuelta:false`. La condición completa está en el
+ * docblock de `logDiagnosticoJoinStaff`.
  */
 type MotivoSinUsuario =
   | 'SIN_COOKIE_HEADER' // el handshake no trajo ningún header `cookie`
@@ -132,10 +134,14 @@ export function origenPermitido(origen: string | undefined): boolean {
 @Injectable()
 @WebSocketGateway({
   cors: {
-    // Callback en vez de string: el CORS de socket.io corre ANTES que
-    // handleConnection y aplica al handshake de polling. Si acá quedara solo
-    // FRONTEND_URL, el origin con www se rechazaría antes de que el chequeo de
-    // handleConnection llegue a correr. Las dos capas comparten la allowlist.
+    // Callback en vez de string: el CORS de socket.io corre ANTES que el
+    // middleware de `afterInit` y aplica al handshake de polling. Si acá
+    // quedara solo FRONTEND_URL, el origin con www se rechazaría antes de que
+    // el chequeo del middleware llegue a correr.
+    //
+    // Esta capa NO alcanza sola: CORS es un mecanismo del navegador sobre HTTP
+    // y no cubre el transporte websocket. Quien manda es el middleware; las
+    // dos comparten la misma allowlist vía `origenPermitido`.
     origin: (origin, callback) => {
       if (origenPermitido(origin)) return callback(null, true);
       return callback(new Error('Origin no permitido (WebSocket)'), false);
@@ -144,7 +150,7 @@ export function origenPermitido(origen: string | undefined): boolean {
     credentials: true,
   },
 })
-export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
+export class PedidosGateway implements OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
@@ -154,33 +160,80 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
     private prisma: PrismaService,
   ) {}
 
-  afterInit(server: Server) {
-    console.log('[WebSocket] PedidosGateway initialized');
-  }
-
   /**
-   * 🍪 Autenticación en el handshake.
+   * Registra el middleware del handshake ANTES de que socket.io pueda emitir
+   * el paquete CONNECT de ningún cliente.
    *
-   * El JWT ya no viaja en el body de `join-staff`: el cliente no puede leer una
-   * cookie HttpOnly, así que ese camino quedó muerto al migrar el auth HTTP.
-   * Ahora el navegador manda la cookie sola en el handshake y el usuario se
-   * resuelve UNA vez por conexión.
+   * 🏁 Esto es lo que cierra la carrera de timing (Capa 2). Antes la auth vivía
+   * en `handleConnection`, que Nest invoca DESPUÉS de que socket.io ya le mandó
+   * el CONNECT al cliente — y como era `async`, nadie esperaba su promesa. En
+   * ese hueco el cliente veía `connect`, emitía `join-staff` y
+   * `client.data.user` todavía no existía: SESION_INVALIDA con la cookie
+   * perfecta. Pasó en producción.
    *
-   * Importante: una cookie ausente o inválida NO rechaza la conexión. El mismo
-   * gateway atiende `join-pedido`, el tracking público del cliente, que es
-   * anónimo por diseño. Solo `join-staff` exige usuario.
+   * socket.io NO emite el CONNECT hasta que el último middleware llama
+   * `next()`, así que el cliente no puede emitir `join-staff` antes de que
+   * `socket.data.user` esté seteado. La ventana no se mitiga: deja de existir.
+   *
+   * Ojo si algún día este gateway pasa a tener `namespace`: `server.use()`
+   * registra en el namespace `/`, y el middleware tendría que mudarse con él.
    */
-  async handleConnection(client: Socket) {
-    if (!origenPermitido(client.handshake.headers.origin)) {
-      client.disconnect(true);
-      return;
-    }
+  afterInit(server: Server) {
+    // El middleware es `async` a propósito y se registra tal cual (en vez de
+    // envolverlo en uno sincrónico con `void`): así devuelve la promesa del
+    // handshake, que es lo que el spec necesita para poder awaitearlo y
+    // verificar que `next()` se llamó exactamente una vez.
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
+    server.use(async (socket, next) => {
+      // ── Bloque 1 — origin. FAIL-CLOSED ────────────────────────────────────
+      // Un chequeo de origin que explota no puede degradar a "pasá": es un
+      // límite de seguridad, se cierra. Acá manda el middleware y NO el `cors`
+      // del decorator: CORS es un mecanismo del navegador sobre HTTP y no
+      // cubre el transporte websocket (`new WebSocket(...)` no hace preflight
+      // ni respeta Access-Control-Allow-Origin). El `cors` del decorator sigue
+      // en su lugar para el handshake de polling; las dos capas comparten una
+      // sola allowlist vía `origenPermitido`.
+      try {
+        if (!origenPermitido(socket.handshake?.headers?.origin)) {
+          return next(new Error('Origin no permitido (WebSocket)'));
+        }
+      } catch {
+        return next(new Error('Origin no permitido (WebSocket)'));
+      }
 
-    const resultado = await this.resolverUsuarioDelHandshake(client);
-    client.data.user = resultado.user;
+      // ── Bloque 2 — auth. FAIL-OPEN a usuario null ─────────────────────────
+      // ⚠️ REGLA INVARIABLE: la falta de usuario NUNCA rechaza la conexión.
+      // Este mismo gateway atiende `join-pedido`, el tracking público del
+      // cliente, que es anónimo por diseño: un `next(err)` acá por no haber
+      // cookie rompería el seguimiento de todos los pedidos. Solo `join-staff`
+      // exige usuario, y lo chequea él.
+      //
+      // El try/catch no es decorativo: socket.io IGNORA el valor de retorno de
+      // un middleware async, así que una excepción acá no la agarra nadie —
+      // quedaría como unhandled rejection y ese socket nunca recibiría el
+      // CONNECT (se cuelga hasta el timeout).
+      try {
+        const resultado = await this.resolverUsuarioDelHandshake(socket);
+        socket.data.user = resultado.user;
 
-    // 🔎 DIAGNÓSTICO TEMPORAL — grepear por `[WS-DIAG]`. Ver `MotivoSinUsuario`.
-    this.logDiagnostico(client, resultado);
+        // 🔎 DIAGNÓSTICO TEMPORAL — grepear por `[WS-DIAG]`. Ver
+        // `MotivoSinUsuario`.
+        this.logDiagnostico(socket, resultado);
+      } catch (e) {
+        // Asignar `null` explícito no es redundante: `handleJoinStaff` y
+        // `getStaffConectados` leen esta clave, y dejarla sin definir devuelve
+        // al estado ambiguo que este cambio elimina.
+        socket.data.user = null;
+        console.error('[WS] fallo inesperado resolviendo el handshake', e);
+      }
+
+      // Único `next()` sin argumentos, y fuera de todo `if`: se llama SIEMPRE,
+      // haya usuario o no. La única llamada con error en este middleware es la
+      // del origin, más arriba.
+      next();
+    });
+
+    console.log('[WebSocket] PedidosGateway initialized');
   }
 
   /**
@@ -341,17 +394,27 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
   /**
    * 🔎 DIAGNÓSTICO TEMPORAL — grepear por `[WS-DIAG]`.
    *
-   * Mide la carrera de timing. `handleConnection` es `async` y nadie la espera,
-   * y socket.io le manda el paquete CONNECT al cliente ANTES de invocarla, así
-   * que un `join-staff` puede llegar mientras la auth del handshake todavía
-   * está esperando a la DB. Desde `handleJoinStaff` los dos casos se ven igual
-   * (`client.data.user` falsy → SESION_INVALIDA), pero se distinguen así:
+   * Esto es el CRITERIO DE ACEPTACIÓN de la Capa 2, no instrumentación
+   * sobrante. Medía la carrera de timing: cuando la auth vivía en
+   * `handleConnection` (async, invocada DESPUÉS del paquete CONNECT y sin que
+   * nadie esperara su promesa), un `join-staff` podía llegar mientras la auth
+   * seguía esperando a la DB, y `handleJoinStaff` respondía SESION_INVALIDA
+   * con la cookie perfecta. `authResuelta: false` es exactamente esa carrera,
+   * y en producción apareció.
    *
-   * - `authResuelta: false` → `handleConnection` NO terminó todavía. Es la
-   *   carrera: la cookie puede estar perfecta. La línea
-   *   `[WS-DIAG] handshake OK` del mismo `sid` va a aparecer DESPUÉS de esta.
+   * Con la auth en el middleware de `afterInit`, socket.io no manda el CONNECT
+   * hasta que el middleware llama `next()`, así que `authResuelta` tiene que
+   * dar `true` SIEMPRE. Este log es lo único que lo verifica desde afuera.
+   *
+   * TODO [WS-DIAG]: borrar este método, `logDiagnostico` y el andamiaje de
+   * `MotivoSinUsuario`/`ResultadoHandshake` cuando prod acumule ~1 semana sin
+   * una sola línea `authResuelta:false`. Hasta entonces se queda: sin él no
+   * hay forma de confirmar que la Capa 2 hizo lo que dice.
+   *
    * - `authResuelta: true` + `tieneUsuario: false` → la auth terminó y dio
    *   null de verdad; el motivo está en `[WS-DIAG] handshake sin usuario`.
+   * - `authResuelta: false` → NO debería poder pasar más. Si aparece, el
+   *   middleware no se registró o algo lo saltea.
    *
    * Solo escribe logs: no toca `client.data`, no emite, no desconecta, no
    * cambia ninguna decisión.
@@ -363,9 +426,9 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
       console.log('[WS-DIAG] join-staff', {
         sid: client.id,
         t: new Date().toISOString(),
-        // La clave `user` solo existe una vez que `handleConnection` terminó
-        // de asignarla, así que su presencia es exactamente "la auth del
-        // handshake ya corrió". Es distinto de `tieneUsuario`.
+        // La clave `user` solo existe una vez que el middleware del handshake
+        // terminó de asignarla, así que su presencia es exactamente "la auth
+        // del handshake ya corrió". Es distinto de `tieneUsuario`.
         authResuelta: !!data && 'user' in data,
         tieneUsuario: !!data?.user,
         transport: client.conn?.transport?.name,
@@ -379,6 +442,11 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
    * Un socket de staff (campanita admin/POS) pide entrar a la room. El usuario
    * ya viene resuelto del handshake; acá solo se chequea el rol. La regla de
    * roles no cambió: cambió de dónde sale el usuario.
+   *
+   * Desde la Capa 2 el middleware de `afterInit` garantiza que
+   * `client.data.user` ya está resuelto antes de que este handler pueda
+   * ejecutarse, así que `SESION_INVALIDA` recuperó su significado literal:
+   * "no hay usuario", y ya no también "todavía no terminé de averiguarlo".
    */
   @SubscribeMessage('join-staff')
   handleJoinStaff(@ConnectedSocket() client: Socket) {
@@ -511,7 +579,10 @@ export class PedidosGateway implements OnGatewayInit, OnGatewayConnection {
    * llegan a quien se unió a `pedido:${pedidoId}` con el trackingCode
    * correcto, nunca a un broadcast global.
    */
-  notificarActualizacionPedido(pedidoId: string, payload: Record<string, unknown>) {
+  notificarActualizacionPedido(
+    pedidoId: string,
+    payload: Record<string, unknown>,
+  ) {
     this.server.to(roomPedido(pedidoId)).emit('pedido-actualizado', {
       id: pedidoId,
       ...payload,

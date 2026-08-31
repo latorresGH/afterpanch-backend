@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { HomeService } from './home.service';
 import { CajaService } from '../caja/caja.service';
 import { NegocioConfigService } from '../config/config.service';
+import { InsumosService } from '../insumos/insumos.service';
+import { OfertasService } from '../ofertas/ofertas.service';
 import { PedidosService } from '../pedidos/pedidos.service';
 import { PedidosGateway } from '../pedidos/pedidos.gateway';
 import { UsersService } from '../users/users.service';
@@ -10,6 +12,8 @@ describe('HomeService — GET /admin/home', () => {
   let service: HomeService;
   let caja: any;
   let config: any;
+  let insumos: any;
+  let ofertas: any;
   let pedidos: any;
   let gateway: any;
   let users: any;
@@ -36,6 +40,8 @@ describe('HomeService — GET /admin/home', () => {
         horaActual: '22:10',
       }),
     };
+    insumos = { contarBajoMinimo: jest.fn().mockResolvedValue(0) };
+    ofertas = { getVigenteConVencimiento: jest.fn().mockResolvedValue(null) };
     pedidos = {
       getPendienteCobro: jest.fn().mockResolvedValue(0),
       listarActivos: jest.fn().mockResolvedValue([]),
@@ -59,6 +65,8 @@ describe('HomeService — GET /admin/home', () => {
         HomeService,
         { provide: CajaService, useValue: caja },
         { provide: NegocioConfigService, useValue: config },
+        { provide: InsumosService, useValue: insumos },
+        { provide: OfertasService, useValue: ofertas },
         { provide: PedidosService, useValue: pedidos },
         { provide: PedidosGateway, useValue: gateway },
         { provide: UsersService, useValue: users },
@@ -215,6 +223,66 @@ describe('HomeService — GET /admin/home', () => {
     });
   });
 
+  describe('alertas', () => {
+    it('reusa el conteo de demorados de pedidos abiertos', async () => {
+      pedidos.listarActivos.mockResolvedValue([
+        { id: 'p-1', demorado: true },
+        { id: 'p-2', demorado: false },
+        { id: 'p-3', demorado: true },
+      ]);
+
+      const { alertas, pedidosAbiertos } = await service.getHome('u-1');
+
+      expect(alertas.pedidosDemorados).toBe(2);
+      // Un solo numero para los dos bloques: si se separaran, el aviso naranja
+      // podria decir algo distinto que el encabezado de al lado.
+      expect(alertas.pedidosDemorados).toBe(pedidosAbiertos.demorados);
+    });
+
+    it('pasa el conteo de insumos bajo minimo tal cual lo cuenta Postgres', async () => {
+      insumos.contarBajoMinimo.mockResolvedValue(4);
+
+      const { alertas } = await service.getHome('u-1');
+
+      expect(alertas.insumosBajoMinimo).toBe(4);
+      expect(insumos.contarBajoMinimo).toHaveBeenCalledTimes(1);
+    });
+
+    it('trae la oferta vigente con su hora de vencimiento', async () => {
+      ofertas.getVigenteConVencimiento.mockResolvedValue({
+        id: 'of-1',
+        nombre: 'Martes 2x1',
+        hasta: '23:59',
+        minutosRestantes: 109,
+      });
+
+      const { alertas } = await service.getHome('u-1');
+
+      expect(alertas.ofertaVigente).toEqual({
+        id: 'of-1',
+        nombre: 'Martes 2x1',
+        hasta: '23:59',
+        minutosRestantes: 109,
+      });
+    });
+
+    it('deja la oferta en null cuando no hay ninguna corriendo', async () => {
+      const { alertas } = await service.getHome('u-1');
+
+      // El front tiene que poder mostrar el estado vacio: nunca una hora
+      // inventada.
+      expect(alertas.ofertaVigente).toBeNull();
+    });
+
+    it('evalua la vigencia contra el mismo "ahora" que el resto del Home', async () => {
+      await service.getHome('u-1');
+
+      const [ahora] = ofertas.getVigenteConVencimiento.mock.calls[0];
+      expect(ahora).toBeInstanceOf(Date);
+      expect(Math.abs(Date.now() - ahora.getTime())).toBeLessThan(5000);
+    });
+  });
+
   it('resuelve todos los bloques en paralelo, con una sola pasada por service', async () => {
     const { local, facturacionSemana, movimientosHoy, deliveryPendientesConfirmar } =
       await service.getHome('u-1');
@@ -234,6 +302,8 @@ describe('HomeService — GET /admin/home', () => {
       pedidos.getFacturacionPorDia,
       users.findStaffOperativo,
       gateway.getStaffConectados,
+      insumos.contarBajoMinimo,
+      ofertas.getVigenteConVencimiento,
     ]) {
       expect(fn).toHaveBeenCalledTimes(1);
     }

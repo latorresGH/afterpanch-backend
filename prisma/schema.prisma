@@ -58,6 +58,11 @@ model Insumo {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Postgres no indexa solo las columnas de FK. Lo usa el filtro por proveedor
+  // del panel de Insumos y la validacion de borrado de Proveedor, que cuenta
+  // cuantos insumos le cuelgan.
+  @@index([proveedorId])
 }
 
 model StockMovimiento {
@@ -81,6 +86,16 @@ model StockMovimiento {
   @@index([extraId])
   @@index([aderezoId])
   @@index([createdAt])
+
+  // Historial de UN insumo ordenado por fecha (el modal del panel) y su
+  // consumo dentro de un rango. El simple de [insumoId] no alcanza: obliga a
+  // ordenar despues de leer todas las filas del insumo.
+  @@index([insumoId, createdAt])
+
+  // Reporte de consumo por rango: igualdad en tipo + rango en fecha. La
+  // columna de igualdad va primera para que el rango caiga sobre un tramo
+  // contiguo del indice.
+  @@index([tipo, createdAt])
 }
 
 model Proveedor {
@@ -147,6 +162,20 @@ model ProductoReceta {
   
   producto    Producto @relation(fields: [productoId], references: [id])
   insumo      Insumo   @relation(fields: [insumoId], references: [id])
+
+  // Nada impedia cargar dos veces el mismo insumo en un producto, y el
+  // descuento de stock al vender recorre la receta fila por fila: la linea
+  // duplicada descontaba doble sin que nadie lo viera. La receta es un set
+  // (insumo -> cantidad), asi que la unicidad vive en la base y no solo en
+  // el DTO.
+  @@unique([productoId, insumoId])
+
+  // Postgres no indexa las columnas de FK por su cuenta y esta tabla solo
+  // tenia la PK. `insumoId` es el que hacia seq scan (buscar que productos
+  // usan un insumo); `productoId` queda cubierto ademas por la unique de
+  // arriba, que lo lleva de columna lider - ver la nota en la migracion.
+  @@index([productoId])
+  @@index([insumoId])
 }
 
 // --- SALÓN Y MESAS ---
@@ -266,6 +295,14 @@ model PedidoDetalle {
   ofertaAplicada PedidoOferta[]
 
   @@index([comboInstanciaId])
+
+  // Postgres no indexa las columnas de FK por su cuenta, y estas dos venian
+  // sin nada desde el init. Las usa toda la seccion de Estadisticas: el join
+  // contra Pedido para acotar por rango de fechas, y el agrupado por producto
+  // del top y del maridaje. `productoId` ademas cubre GET /productos/:id/stats,
+  // que ya estaba en produccion consultandola sin indice.
+  @@index([pedidoId])
+  @@index([productoId])
 }
 
 // --- GESTIÓN DE EXTRAS ---
@@ -276,6 +313,13 @@ model Extra {
   precio           Float    @default(500)
   unidadMedida     String   @default("un")
   stockActual      Float    @default(0)
+
+  // Umbral de aviso PROPIO del extra, mismo criterio que Insumo.stockMinimo:
+  // no hay un umbral global del que colgarse, cada extra declara el suyo. El
+  // default de la columna existe para que la migracion pueda agregarla NOT
+  // NULL sin reescribir la tabla; el alta lo pide obligatorio (ver CrearExtraDto).
+  stockMinimo      Float    @default(10)
+
   activo           Boolean  @default(true)
   esGlobal         Boolean  @default(false)
   esPremium        Boolean  @default(false)
@@ -512,6 +556,13 @@ model CajaMovimiento {
   createdAt DateTime @default(now())
 
   pedido Pedido? @relation(fields: [pedidoId], references: [id])
+
+  // La tabla no tenia NINGUN indice. Los dos cubren los dos patrones reales:
+  // filtrar solo por fecha (lista de movimientos del Home, "mejor dia" del
+  // periodo) y filtrar por tipo dentro de un rango (getResumenAgregado).
+  // El compuesto no reemplaza al simple: con `tipo` sin restringir no aplica.
+  @@index([fechaConfirmacion])
+  @@index([tipo, fechaConfirmacion])
 }
 
 // --- CONFIGURACIÓN DEL NEGOCIO ---

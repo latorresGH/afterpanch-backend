@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { CajaService } from '../caja/caja.service';
 import { NegocioConfigService } from '../config/config.service';
+import { InsumosService } from '../insumos/insumos.service';
+import { OfertasService } from '../ofertas/ofertas.service';
 import { PedidosService } from '../pedidos/pedidos.service';
 import { PedidosGateway } from '../pedidos/pedidos.gateway';
 import { UsersService } from '../users/users.service';
@@ -19,6 +21,8 @@ export class HomeService {
   constructor(
     private readonly cajaService: CajaService,
     private readonly configService: NegocioConfigService,
+    private readonly insumosService: InsumosService,
+    private readonly ofertasService: OfertasService,
     private readonly pedidosService: PedidosService,
     private readonly pedidosGateway: PedidosGateway,
     private readonly usersService: UsersService,
@@ -49,6 +53,8 @@ export class HomeService {
       conectados,
       facturacionSemana,
       movimientosHoy,
+      insumosBajoMinimo,
+      ofertaVigente,
     ] = await Promise.all([
       this.usersService.findByIdOrNull(userSub),
       this.configService.estaAbierto(ahora),
@@ -60,7 +66,11 @@ export class HomeService {
       this.pedidosGateway.getStaffConectados(),
       this.pedidosService.getFacturacionPorDia(7, ahora),
       this.cajaService.getMovimientosDelRango(inicio, fin),
+      this.insumosService.contarBajoMinimo(),
+      this.ofertasService.getVigenteConVencimiento(ahora),
     ]);
+
+    const pedidosDemorados = pedidosAbiertos.filter((p) => p.demorado).length;
 
     // Porcentaje de lo facturado que ya está cobrado. Se resuelve acá y no en
     // el cliente para que no haya dos fórmulas dando números distintos.
@@ -87,7 +97,7 @@ export class HomeService {
 
       pedidosAbiertos: {
         total: pedidosAbiertos.length,
-        demorados: pedidosAbiertos.filter((p) => p.demorado).length,
+        demorados: pedidosDemorados,
         items: pedidosAbiertos,
       },
 
@@ -106,6 +116,17 @@ export class HomeService {
       facturacionSemana,
 
       movimientosHoy,
+
+      // Los tres avisos chicos de la esquina del Home. Van juntos porque se
+      // muestran juntos, pero cada numero sale del service de su dominio:
+      // aca no se calcula nada, solo se agrupa.
+      alertas: {
+        // El mismo numero que muestra "Pedidos abiertos": se cuenta una sola
+        // vez sobre los activos que ya estan en memoria, sin query extra.
+        pedidosDemorados,
+        insumosBajoMinimo,
+        ofertaVigente,
+      },
     };
   }
 }

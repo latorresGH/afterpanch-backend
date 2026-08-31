@@ -1,0 +1,32 @@
+-- El stock minimo pasa a existir tambien para los EXTRAS.
+--
+-- Que habia: la columna existia SOLO en "Insumo". Un extra no tenia contra que
+-- comparar su stock, asi que no habia forma de decir "este esta bajo minimo":
+-- la unica distincion posible era tener o no tener (stockActual > 0). Con esto
+-- cada extra declara su propio umbral, igual que cada insumo declara el suyo
+-- desde 20260826020000_stock_minimo_por_insumo.
+--
+-- BACKFILL. La columna nace NOT NULL con DEFAULT 10, asi que las filas
+-- existentes quedan todas en 10 en el mismo ALTER: no hace falta un UPDATE
+-- aparte. Se eligio 10 y no el umbral global historico porque ese umbral ya no
+-- existe — la migracion de Insumo borro la clave 'stock_bajo_umbral' de
+-- "Configuracion" — asi que 10 es el mismo numero al que aquella caia por
+-- defecto. Es el criterio acordado para esta seccion.
+--
+-- SEGURIDAD CONTRA LOS DATOS EXISTENTES
+-- - ADD COLUMN ... NOT NULL DEFAULT sobre Postgres 11+ NO reescribe la tabla:
+--   el default se guarda en el catalogo y las filas viejas lo leen de ahi. Es
+--   O(1) y toma un ACCESS EXCLUSIVE momentaneo, no un lock largo.
+-- - No puede fallar por contenido: no hay unicidad, ni FK, ni CHECK, y todas
+--   las filas reciben el mismo valor valido.
+-- - Es aditiva pura: ninguna consulta existente selecciona esta columna, asi
+--   que el codigo viejo sigue funcionando si el deploy queda a mitad de camino.
+-- - Reversible sin perdida de datos que existieran antes: DROP COLUMN alcanza.
+--
+-- EFECTO VISIBLE (esperado, no es un bug): a partir de aca, todo extra con
+-- stockActual < 10 pasa a mostrarse como "bajo minimo" en el panel. No cambia
+-- ninguna regla de negocio — el descuento de stock, la disponibilidad en el
+-- POS y el calculo de precio siguen exactamente igual — solo aparece la
+-- alerta. Los extras que necesiten otro umbral se ajustan desde la ficha.
+ALTER TABLE "Extra"
+  ADD COLUMN "stockMinimo" DOUBLE PRECISION NOT NULL DEFAULT 10;

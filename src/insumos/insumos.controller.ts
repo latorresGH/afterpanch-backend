@@ -1,22 +1,25 @@
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Patch,
-  Param,
+  Controller,
   Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
   Query,
+  Request,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { InsumosService } from './insumos.service';
-import { UpdateInsumoDto } from './dto/update-insumo.dto';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
+
+import { Roles } from '../auth/roles.decorator';
+import { CreateInsumoDto } from './dto/create-insumo.dto';
+import { DescontarStockDto } from './dto/descontar-stock.dto';
+import { MovimientosQueryDto } from './dto/movimientos-query.dto';
 import { SumarStockDto } from './dto/sumar-stock.dto';
 import { ToggleActivoDto } from './dto/toggle-activo.dto';
-import { DescontarStockDto } from './dto/descontar-stock.dto';
-import { Roles } from '../auth/roles.decorator';
-import { Role } from '@prisma/client';
-import { Public } from '../auth/public.decorator';
+import { UpdateInsumoDto } from './dto/update-insumo.dto';
+import { InsumosService } from './insumos.service';
 
 @ApiTags('Insumos')
 @ApiBearerAuth()
@@ -24,34 +27,44 @@ import { Public } from '../auth/public.decorator';
 export class InsumosController {
   constructor(private readonly insumosService: InsumosService) {}
 
+  /**
+   * Alta de insumo.
+   *
+   * Antes entraba como `@Body() body: { ... }` sin DTO, así que el
+   * ValidationPipe no tenía nada que validar: un `stockInicial: "mucho"` o un
+   * `proveedorId` inexistente llegaban derecho al service. Ahora valida contra
+   * `CreateInsumoDto`, que además exige `stockMinimo` (ver la nota del DTO).
+   */
   @Post()
   @Roles(Role.ADMIN)
   @ApiOperation({
     summary: 'Crear insumo',
-    description: 'Crea un nuevo insumo para control de stock.',
+    description:
+      'Crea un insumo para control de stock. `stockMinimo` es obligatorio: ' +
+      'ya no hay umbral global del que heredar.',
   })
-  crear(
-    @Body()
-    body: {
-      nombre: string;
-      stockInicial: number;
-      unidadMedida: string;
-      proveedorId?: string | null;
-    },
-  ) {
-    return this.insumosService.crear(
-      body.nombre,
-      body.stockInicial,
-      body.unidadMedida,
-      body.proveedorId ?? null,
-    );
+  crear(@Body() dto: CreateInsumoDto) {
+    return this.insumosService.crear(dto);
   }
 
+  /**
+   * Listado de insumos con su stock.
+   *
+   * Era @Public(): cualquiera sin login se bajaba el stock real de todo el
+   * depósito. Misma clase de fuga que la de GET /productos, y se cierra igual.
+   * Queda con los dos roles que lo consumen de verdad: ADMIN (panel de Stock,
+   * Proveedores y Productos) y TRABAJADOR (el POS, para los badges de stock).
+   *
+   * La versión paginada, filtrada y con agregados de la pantalla del panel es
+   * `GET /admin/insumos`. Esta se mantiene porque el POS y el editor de
+   * recetas la usan como catálogo completo, que es exactamente lo que quieren.
+   */
   @Get()
-  @Public()
+  @Roles(Role.ADMIN, Role.TRABAJADOR)
   @ApiOperation({
     summary: 'Listar insumos',
-    description: 'Obtiene todos los insumos con su stock actual.',
+    description:
+      'Obtiene todos los insumos con su stock actual. Requiere sesión: el stock del depósito no es información pública.',
   })
   obtenerTodo(@Query('incluirInactivos') incluirInactivos?: string) {
     return this.insumosService.obtenerTodo(incluirInactivos === 'true');
@@ -59,9 +72,18 @@ export class InsumosController {
 
   @Patch(':id')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Actualizar insumo' })
-  actualizar(@Param('id') id: string, @Body() dto: UpdateInsumoDto) {
-    return this.insumosService.actualizar(id, dto);
+  @ApiOperation({
+    summary: 'Actualizar insumo',
+    description:
+      'Si viene `stockActual`, la corrección queda registrada en el ' +
+      'historial de movimientos como AJUSTE_MANUAL.',
+  })
+  actualizar(
+    @Param('id') id: string,
+    @Body() dto: UpdateInsumoDto,
+    @Request() req: any,
+  ) {
+    return this.insumosService.actualizar(id, dto, req.user?.sub);
   }
 
   @Patch(':id/sumar')
@@ -70,8 +92,17 @@ export class InsumosController {
     summary: 'Sumar stock al insumo',
     description: 'Incrementa el stock del insumo.',
   })
-  sumarStock(@Param('id') id: string, @Body() dto: SumarStockDto) {
-    return this.insumosService.sumarStock(id, dto.cantidad, dto.motivo);
+  sumarStock(
+    @Param('id') id: string,
+    @Body() dto: SumarStockDto,
+    @Request() req: any,
+  ) {
+    return this.insumosService.sumarStock(
+      id,
+      dto.cantidad,
+      dto.motivo,
+      req.user?.sub,
+    );
   }
 
   @Patch(':id/restar')
@@ -80,22 +111,40 @@ export class InsumosController {
     summary: 'Descontar stock',
     description: 'Decrementa stock validando que no quede negativo.',
   })
-  descontarStock(@Param('id') id: string, @Body() dto: DescontarStockDto) {
-    return this.insumosService.descontarStock(id, dto.cantidad, undefined, dto.motivo);
+  descontarStock(
+    @Param('id') id: string,
+    @Body() dto: DescontarStockDto,
+    @Request() req: any,
+  ) {
+    return this.insumosService.descontarStock(
+      id,
+      dto.cantidad,
+      undefined,
+      dto.motivo,
+      req.user?.sub,
+    );
   }
 
   @Get(':id/movimientos')
   @Roles(Role.ADMIN, Role.TRABAJADOR)
-  @ApiOperation({ summary: 'Historial de movimientos de stock' })
-  obtenerMovimientos(@Param('id') id: string, @Query('limit') limit?: string) {
-    return this.insumosService.obtenerMovimientos(id, limit ? parseInt(limit) : 50);
+  @ApiOperation({
+    summary: 'Historial de movimientos de stock',
+    description:
+      'Movimientos crudos del insumo. `limit` está clampeado. La versión con ' +
+      'la ficha del insumo y el pedido resuelto es GET /admin/insumos/:id/movimientos.',
+  })
+  obtenerMovimientos(
+    @Param('id') id: string,
+    @Query() query: MovimientosQueryDto,
+  ) {
+    return this.insumosService.obtenerMovimientos(id, query.limit);
   }
 
   @Get('movimientos/recientes')
   @Roles(Role.ADMIN, Role.TRABAJADOR)
   @ApiOperation({ summary: 'Movimientos recientes de stock' })
-  obtenerMovimientosRecientes(@Query('limit') limit?: string) {
-    return this.insumosService.obtenerMovimientosRecientes(limit ? parseInt(limit) : 20);
+  obtenerMovimientosRecientes(@Query() query: MovimientosQueryDto) {
+    return this.insumosService.obtenerMovimientosRecientes(query.limit);
   }
 
   @Patch(':id/activo')
@@ -129,13 +178,17 @@ export class InsumosController {
     return this.insumosService.borrar(id);
   }
 
+  /**
+   * @deprecated usar `GET /admin/insumos/reporte-consumo`. Se mantiene porque
+   * el panel que hay hoy en producción lo consume con esta forma exacta.
+   */
   @Get('reporte/consumo')
   @Roles(Role.ADMIN, Role.TRABAJADOR)
-  @ApiOperation({ summary: 'Reporte de consumo de stock por período' })
-  reporteConsumo(
-    @Query('desde') desde: string,
-    @Query('hasta') hasta: string,
-  ) {
+  @ApiOperation({
+    summary: 'Reporte de consumo de stock por período (forma vieja)',
+    deprecated: true,
+  })
+  reporteConsumo(@Query('desde') desde: string, @Query('hasta') hasta: string) {
     return this.insumosService.reporteConsumo(desde, hasta);
   }
 }

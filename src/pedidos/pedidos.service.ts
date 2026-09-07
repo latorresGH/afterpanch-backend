@@ -90,41 +90,24 @@ export class PedidosService {
     dto: CreatePedidoDto,
     actor?: { sub?: string; role?: Role; email?: string } | null,
   ) {
-    const [horaAperturaStr, horaCierreStr] = await Promise.all([
-      this.configService.obtener('hora_apertura'),
-      this.configService.obtener('hora_cierre'),
-    ]);
+    // ¿El local toma pedidos ahora? La respuesta la da SOLO
+    // `NegocioConfigService.estaAbierto()`. Acá vivía una copia manual de ese
+    // cálculo —releía 'hora_apertura'/'hora_cierre' y rehacía las cuentas— que
+    // con el horario por día habría quedado mirando dos claves que ya no
+    // mandan: el menú habría dicho una cosa y esta validación otra.
+    //
+    // Bloquea a CUALQUIERA, sin excepción de rol: es la misma ruta para el
+    // menú público y para el POS del staff, y el comportamiento acordado es
+    // que el horario rija igual para los dos.
+    const estadoLocal = await this.configService.estaAbierto();
 
     const demoraResult = await this.getDemoraActual();
     const demoraSnapshot = demoraResult.minutos;
 
-    if (horaAperturaStr && horaCierreStr) {
-      const ahora = new Date();
-      const opciones: Intl.DateTimeFormatOptions = {
-        timeZone: 'America/Argentina/Mendoza',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      };
-      const horaActualStr = ahora.toLocaleTimeString('es-AR', opciones);
-      const [horaActualHoras, horaActualMinutos] = horaActualStr.split(':').map(Number);
-      const horaActual = horaActualHoras * 60 + horaActualMinutos;
-
-      const [horaAp, minAp] = horaAperturaStr.split(':').map(Number);
-      const [horaCi, minCi] = horaCierreStr.split(':').map(Number);
-      const horaApertura = horaAp * 60 + (minAp || 0);
-      const horaCierre = horaCi * 60 + (minCi || 0);
-
-      const cruzaMedianoche = horaCierre < horaApertura;
-      const estaAbierto = cruzaMedianoche
-        ? (horaActual >= horaApertura || horaActual < horaCierre)
-        : (horaActual >= horaApertura && horaActual < horaCierre);
-
-      if (!estaAbierto) {
-        throw new BadRequestException(
-          `Estamos cerrados. Horario de atención: ${horaAperturaStr} a ${horaCierreStr}`,
-        );
-      }
+    if (!estadoLocal.abierto) {
+      throw new BadRequestException(
+        estadoLocal.mensajeCierre ?? 'Estamos cerrados.',
+      );
     }
 
     const {

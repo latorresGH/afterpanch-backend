@@ -59,7 +59,11 @@ describe('Stock Crítico (e2e)', () => {
         .send({
           nombre: `Carne Stock Test ${Date.now()}`,
           stockInicial: 1000,
-          unidad: 'gr',
+          // `unidadMedida` (no `unidad`), 'g' (no 'gr') y `stockMinimo`
+          // obligatorio: los tres los impuso el rework de Insumos, que dejo
+          // estos payloads desactualizados y toda la suite en rojo.
+          unidadMedida: 'g',
+          stockMinimo: 5,
         })
         .expect(201);
 
@@ -74,7 +78,11 @@ describe('Stock Crítico (e2e)', () => {
         .send({
           nombre: `Queso Insumo Test ${Date.now()}`,
           stockInicial: 50,
-          unidad: 'gr',
+          // `unidadMedida` (no `unidad`), 'g' (no 'gr') y `stockMinimo`
+          // obligatorio: los tres los impuso el rework de Insumos, que dejo
+          // estos payloads desactualizados y toda la suite en rojo.
+          unidadMedida: 'g',
+          stockMinimo: 5,
         })
         .expect(201);
 
@@ -324,7 +332,11 @@ describe('Stock Crítico (e2e)', () => {
         .send({
           nombre: `Insumo Limitado ${Date.now()}`,
           stockInicial: 50,
-          unidad: 'gr',
+          // `unidadMedida` (no `unidad`), 'g' (no 'gr') y `stockMinimo`
+          // obligatorio: los tres los impuso el rework de Insumos, que dejo
+          // estos payloads desactualizados y toda la suite en rojo.
+          unidadMedida: 'g',
+          stockMinimo: 5,
         })
         .expect(201);
 

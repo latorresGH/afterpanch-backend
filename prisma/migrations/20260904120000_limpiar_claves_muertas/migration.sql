@@ -1,0 +1,43 @@
+-- Entierra dos claves de "Configuracion" que ya no lee nadie.
+--
+-- 1. 'stock_bajo_umbral' — el umbral de stock bajo GLOBAL.
+--    Ya lo habia borrado 20260826020000_stock_minimo_por_insumo, despues de
+--    backfillear "Insumo"."stockMinimo": el umbral paso a ser por insumo, que
+--    es lo unico que tiene sentido (un insumo del que se venden 60 unidades
+--    por dia y otro del que se usan 2 no pueden compartir umbral).
+--
+--    ⚠️ POR QUE SE VUELVE A BORRAR: aquella migracion la borro, pero el panel
+--    viejo la RESUCITABA. `POST /config/:clave` no tiene whitelist y hace un
+--    upsert ciego, asi que cada vez que alguien apretaba "Guardar umbral" en
+--    /admin/config la fila volvia a existir, y el POS volvia a pintar badges
+--    de stock bajo contra un numero global divergente de "Insumo"."stockMinimo".
+--    Este DELETE la limpia por si eso paso; lo que evita que vuelva es el
+--    guard de CLAVES_ELIMINADAS en config.service.ts, que ahora la rechaza.
+--
+-- 2. 'costo_envio_base' — clave muerta desde siempre.
+--    Se sembraba en inicializarPorDefecto y NADIE la leia: ni el backend ni el
+--    frontend. El costo de envio real sale de 'delivery_precio_base' (pedido
+--    publico anonimo), del body del empleado, o del sistema de envios. Se
+--    quita tambien del seed, si no la proxima llamada a inicializarPorDefecto
+--    la volveria a crear.
+--
+-- SEGURIDAD CONTRA LOS DATOS EXISTENTES
+-- - Borra como mucho DOS filas de una tabla clave/valor. No hay FKs colgando
+--   de "Configuracion": ninguna otra tabla la referencia.
+-- - Es idempotente: si las filas no estan (es el caso de 'stock_bajo_umbral'
+--   en una base donde nadie apreto ese boton), el DELETE no hace nada y no
+--   falla.
+-- - NO toca ninguna otra clave. En particular NO toca 'demora_modo' ni
+--   'demora_manual_minutos' (que se editan desde otra pantalla y siguen
+--   vivas), ni 'hora_apertura'/'hora_cierre' (legacy a proposito, las lee el
+--   frontend desplegado hasta que salga el nuevo).
+-- - Ningun codigo lee estas dos claves, asi que borrarlas no puede cambiar
+--   ningun comportamiento. El unico efecto visible es que el boton "Guardar
+--   umbral" del panel VIEJO ahora responde 400 con un mensaje que explica que
+--   la clave se elimino — que es lo correcto: ese input dejo de significar
+--   algo cuando el umbral paso a ser por insumo.
+-- - Reversible: son dos INSERT si alguna vez hiciera falta, pero no haria
+--   falta, porque nada las consulta.
+
+DELETE FROM "Configuracion"
+WHERE "clave" IN ('stock_bajo_umbral', 'costo_envio_base');

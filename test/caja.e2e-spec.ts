@@ -62,7 +62,11 @@ describe('Caja Crítico (e2e)', () => {
         .send({
           nombre: `Insumo Caja ${Date.now()}`,
           stockInicial: 1000,
-          unidad: 'gr',
+          // `unidadMedida` (no `unidad`), 'g' (no 'gr') y `stockMinimo`
+          // obligatorio: los tres los impuso el rework de Insumos, que dejo
+          // estos payloads desactualizados y toda la suite en rojo.
+          unidadMedida: 'g',
+          stockMinimo: 5,
         })
         .expect(201);
 
@@ -127,27 +131,88 @@ describe('Caja Crítico (e2e)', () => {
       const response = await request(app.getHttpServer())
         .post(`/caja/pedido/${pedidoDeliveryId}/confirmar`)
         .set('Cookie', adminCookie)
-        .send({
-          confirmadoPor: 'Admin Test',
-          gananciaRepartidor: costoEnvio,
-        })
+        .send({ gananciaRepartidor: costoEnvio })
         .expect(201);
 
-      expect(response.body.pedidoId).toBe(pedidoDeliveryId);
-      expect(response.body.tipo).toBe('ENTRADA');
+      expect(response.body.yaExistia).toBe(false);
+      expect(response.body.movimiento.pedidoId).toBe(pedidoDeliveryId);
+      expect(response.body.movimiento.tipo).toBe('ENTRADA');
     });
 
-    it('NO permite confirmar el mismo pedido 2 veces', async () => {
+    it('la autoría sale del JWT, no del body', async () => {
+      const [movimiento] = (
+        await request(app.getHttpServer())
+          .get(`/caja/pedido/${pedidoDeliveryId}`)
+          .set('Cookie', adminCookie)
+          .expect(200)
+      ).body;
+
+      // El body de arriba no mandó ningún nombre: los dos campos los llenó el
+      // backend con el usuario del token.
+      expect(movimiento.registradoPorId).toBeTruthy();
+      expect(movimiento.confirmadoPor).toBeTruthy();
+      expect(movimiento.confirmadoPor).not.toBe('Admin');
+      expect(movimiento.confirmadoPor).not.toBe('POS');
+    });
+
+    it('rechaza un confirmadoPor mandado por el cliente', async () => {
+      // El DTO ya no lo declara y el ValidationPipe corre con
+      // forbidNonWhitelisted: si algún cliente viejo lo sigue mandando,
+      // queremos enterarnos con un 400, no que escriba un nombre inventado.
       const response = await request(app.getHttpServer())
         .post(`/caja/pedido/${pedidoDeliveryId}/confirmar`)
         .set('Cookie', adminCookie)
-        .send({
-          confirmadoPor: 'Admin Test',
-          gananciaRepartidor: costoEnvio,
-        });
+        .send({ confirmadoPor: 'Quien Yo Quiera', gananciaRepartidor: costoEnvio });
 
       expect(response.status).toBe(400);
-      expect(response.body.message).toContain('ya tiene un movimiento');
+    });
+
+    it('confirmar el mismo pedido 2 veces NO duplica el movimiento', async () => {
+      // Ya no es un error: es idempotente. Devuelve el movimiento que ya
+      // estaba, marcado con yaExistia, y la caja sigue teniendo uno solo.
+      const response = await request(app.getHttpServer())
+        .post(`/caja/pedido/${pedidoDeliveryId}/confirmar`)
+        .set('Cookie', adminCookie)
+        .send({ gananciaRepartidor: costoEnvio });
+
+      expect(response.status).toBe(201);
+      expect(response.body.yaExistia).toBe(true);
+
+      const movimientos = (
+        await request(app.getHttpServer())
+          .get(`/caja/pedido/${pedidoDeliveryId}`)
+          .set('Cookie', adminCookie)
+          .expect(200)
+      ).body;
+
+      expect(movimientos).toHaveLength(1);
+    });
+
+    it('la UNIQUE aguanta N confirmaciones concurrentes del mismo pedido', async () => {
+      // El escenario del bug: el findFirst solo no alcanza porque Postgres
+      // corre en READ COMMITTED. Cinco requests a la vez sobre el mismo
+      // pedido tienen que dejar UN movimiento, no cinco.
+      const disparos = Array.from({ length: 5 }, () =>
+        request(app.getHttpServer())
+          .post(`/caja/pedido/${pedidoDeliveryId}/confirmar`)
+          .set('Cookie', adminCookie)
+          .send({ gananciaRepartidor: costoEnvio }),
+      );
+
+      const respuestas = await Promise.all(disparos);
+
+      for (const r of respuestas) {
+        expect(r.status).toBe(201);
+      }
+
+      const movimientos = (
+        await request(app.getHttpServer())
+          .get(`/caja/pedido/${pedidoDeliveryId}`)
+          .set('Cookie', adminCookie)
+          .expect(200)
+      ).body;
+
+      expect(movimientos).toHaveLength(1);
     });
 
     it('separación correcta de ganancias', async () => {
@@ -194,10 +259,7 @@ describe('Caja Crítico (e2e)', () => {
       const confirmResponse = await request(app.getHttpServer())
         .post(`/caja/pedido/${pedidoResponse.body.id}/confirmar`)
         .set('Cookie', adminCookie)
-        .send({
-          confirmadoPor: 'Admin',
-          gananciaRepartidor: 300,
-        });
+        .send({ gananciaRepartidor: 300 });
 
       expect(confirmResponse.status).toBe(400);
       expect(confirmResponse.body.message).toContain('cancelado');
@@ -220,10 +282,7 @@ describe('Caja Crítico (e2e)', () => {
       const confirmResponse = await request(app.getHttpServer())
         .post(`/caja/pedido/${pedidoResponse.body.id}/confirmar`)
         .set('Cookie', adminCookie)
-        .send({
-          confirmadoPor: 'Admin',
-          gananciaRepartidor: 99999, // Mayor al total
-        });
+        .send({ gananciaRepartidor: 99999 }); // Mayor al total
 
       expect(confirmResponse.status).toBe(400);
     });

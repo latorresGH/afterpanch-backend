@@ -62,7 +62,11 @@ describe('Pedidos (e2e)', () => {
         .send({
           nombre: `Carne Test ${Date.now()}`,
           stockInicial: 1000,
-          unidad: 'gr',
+          // `unidadMedida` (no `unidad`), 'g' (no 'gr') y `stockMinimo`
+          // obligatorio: los tres los impuso el rework de Insumos, que dejo
+          // estos payloads desactualizados y toda la suite en rojo.
+          unidadMedida: 'g',
+          stockMinimo: 5,
         })
         .expect(201);
 
@@ -105,6 +109,14 @@ describe('Pedidos (e2e)', () => {
         .set('Cookie', authCookie)
         .send({
           nombre: `Ketchup Test ${Date.now()}`,
+          // `stockActual` explicito: este endpoint le ponia 999 por defecto y
+          // el rework de Aderezos lo cambio a 0 ("una salsa que todavia no se
+          // cargo no tiene stock"), asi que `crearPedido` rechazaba con "Sin
+          // stock de aderezo" y los tests de aderezos de mas abajo se caian.
+          // El fixture declara el stock que necesita en vez de apoyarse en un
+          // default: holgado, porque el aderezo se reusa en varios pedidos y
+          // cada unidad descuenta 1.
+          stockActual: 1000,
         })
         .expect(201);
 

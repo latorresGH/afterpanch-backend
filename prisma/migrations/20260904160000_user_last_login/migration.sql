@@ -1,0 +1,27 @@
+-- Registra el ultimo login exitoso de cada usuario.
+--
+-- QUE HABIA: nada. El sistema no guardaba ningun rastro de cuando alguien
+-- entro por ultima vez, asi que la pantalla de Personal no podia responder
+-- "¿este acceso se sigue usando?" — que es la pregunta que uno se hace antes
+-- de desactivar una cuenta vieja.
+--
+-- NULLABLE, y se queda nullable: null significa "nunca entro (o entro antes de
+-- que existiera esta columna)". No se backfillea con `now()` ni con
+-- `createdAt` porque las dos serian mentiras — la primera dice que todos
+-- entraron recien, la segunda que entraron el dia que se creo la cuenta. El
+-- dato no existe hacia atras y la pantalla lo muestra como "nunca ingreso",
+-- que es lo honesto.
+--
+-- SEGURIDAD CONTRA LOS DATOS EXISTENTES
+-- - ADITIVA PURA: una columna nueva, nullable y sin default. Sobre Postgres
+--   11+ un ADD COLUMN asi no reescribe la tabla ni toma un lock largo: es
+--   O(1) y solo actualiza el catalogo.
+-- - No puede fallar por contenido: no hay unicidad, ni FK, ni CHECK, y las
+--   filas existentes quedan en NULL, que es un valor valido para la columna.
+-- - Ninguna consulta existente selecciona esta columna, asi que el codigo
+--   viejo sigue funcionando igual si el deploy queda a mitad de camino (el
+--   backend viejo la ignora; el nuevo la lee como null hasta el primer login).
+-- - Reversible sin perdida de datos que existieran antes: DROP COLUMN alcanza.
+--   Lo unico que se perderia son los logins registrados desde esta migracion.
+
+ALTER TABLE "User" ADD COLUMN "lastLoginAt" TIMESTAMP(3);

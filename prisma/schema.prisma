@@ -25,6 +25,12 @@ model User {
   role      Role     @default(TRABAJADOR)
   activo    Boolean  @default(true)
   pedidos   Pedido[] @relation("RepartidorPedidos") // Para el rol DELIVERY
+
+  // Movimientos de caja que registro esta persona. Es solo el lado inverso de
+  // la FK; borrar un usuario NO borra su historial de caja (la relacion es
+  // SET NULL del otro lado, ver CajaMovimiento.registradoPorId).
+  movimientosCaja CajaMovimiento[] @relation("MovimientosRegistrados")
+
   createdAt DateTime @default(now())
 
   // El splash "Bienvenido {nombre}" del Home admin se muestra una sola vez.
@@ -33,6 +39,16 @@ model User {
   // SSR que la sirve: si lo marcara el GET, un prefetch de /admin consumiría
   // el flag sin que nadie llegara a ver el splash.
   bienvenidaVista Boolean @default(false)
+
+  /**
+   * Ultimo login exitoso. Null en los usuarios que nunca entraron (y en todos
+   * los que ya existian cuando se agrego la columna: el dato no es
+   * reconstruible hacia atras, no hay registro de logins previos).
+   * Lo escribe `AuthService.login`, no el guard: se trata de "inicio de
+   * sesion", no de "ultima actividad". Un token de 10hs haria que el segundo
+   * significado escribiera en cada request.
+   */
+  lastLoginAt DateTime?
 }
 
 // --- GESTIÓN DE STOCK (INSUMOS) ---
@@ -91,7 +107,9 @@ model StockMovimiento {
   // consumo dentro de un rango. El simple de [insumoId] no alcanza: obliga a
   // ordenar despues de leer todas las filas del insumo.
   @@index([insumoId, createdAt])
-
+  // Lo mismo para las salsas: el historial de UNA salsa por fecha y su consumo
+  // dentro de una ventana, que es lo que pide /admin/aderezos.
+  @@index([aderezoId, createdAt])
   // Reporte de consumo por rango: igualdad en tipo + rango en fecha. La
   // columna de igualdad va primera para que el rango caiga sobre un tramo
   // contiguo del indice.
@@ -376,10 +394,25 @@ model Aderezo {
   id               String   @id @default(uuid())
   nombre           String   @unique
   stockActual      Float    @default(0)
-  unidadMedida     String?  // g, ml, unidad, etc.
+
+  // Nullable en la base por historia, OBLIGATORIA por contrato: el backfill de
+  // 20260831000000 dejo todas las filas con valor y los DTOs del panel la
+  // exigen de la lista blanca (`UNIDADES_MEDIDA` en src/insumos/unidades.ts).
+  // Pendiente aparte: promoverla a NOT NULL.
+  unidadMedida String? // g, ml, u, etc.
+
+  // Umbral de aviso PROPIO de la salsa, mismo criterio que Insumo.stockMinimo
+  // y Extra.stockMinimo. El default de la columna existe para que la migracion
+  // pudiera agregarla NOT NULL sin reescribir la tabla; el alta lo pide
+  // obligatorio (ver CrearAderezoDto).
+  stockMinimo Float @default(10)
+
   activo           Boolean  @default(true)
   esGlobal         Boolean  @default(false)
 
+  // ⚠️ DEPRECADA. Las salsas son SIEMPRE GRATIS: no tienen precio ni lo van a
+  // tener. La tabla existe con 0 filas y ningun endpoint la lee ni la escribe
+  // desde el rework. Queda solo para poder borrarla en una migracion aparte.
   precioPorCategoria   AderezoPrecio[]
   categoriasAplica     AderezoCategoria[]
   detalles             PedidoDetalle[]
@@ -525,6 +558,10 @@ model PedidoOferta {
   @@index([ofertaId])
 }
 
+// ⚠️ TABLA MUERTA / A DEPRECAR. Las salsas son siempre gratis (decision de
+// producto): no se cobran por categoria ni de ninguna otra forma. La tabla
+// tiene 0 filas y nadie la lee ni la escribe. Se conserva solo para poder
+// borrarla en una migracion propia; NO agregar codigo nuevo que la use.
 model AderezoPrecio {
   id String @id @default(uuid())
   aderezoId String
@@ -551,12 +588,53 @@ model CajaMovimiento {
   gananciaNegocio Float
   gananciaRepartidor Float
   descripcion String?
+
+  /**
+   * Nombre de quien registro el movimiento, congelado en el momento de
+   * escribirlo. NO es la fuente de verdad de la autoria: es un snapshot para
+   * que el historico siga siendo legible si el usuario se renombra o se borra.
+   * Quien pregunta "quien cobro esto" tiene que mirar `registradoPorId`.
+   * Hasta esta migracion era TODO lo que habia, y encima llegaba del body de
+   * la request: el front mandaba los literales 'Admin' y 'POS', y cualquiera
+   * podia mandar el nombre que quisiera. Las filas viejas conservan eso.
+   */
   confirmadoPor String?
+
+  /**
+   * Quien registro el movimiento, de verdad. Sale SIEMPRE del JWT
+   * (`req.user.sub`), nunca del body.
+   * Null en dos casos: las filas anteriores a esta migracion (el dato no es
+   * reconstruible: 'Admin'/'POS' no identifican a nadie) y las que pierden a
+   * su usuario, porque la FK es SET NULL a proposito — borrar un empleado no
+   * puede borrar ni bloquear el historico de caja. En los dos casos queda
+   * `confirmadoPor` como unico rastro.
+   */
+  registradoPorId String?
+  registradoPor   User?   @relation("MovimientosRegistrados", fields: [registradoPorId], references: [id], onDelete: SetNull)
+
   fechaConfirmacion DateTime?
   createdAt DateTime @default(now())
 
   pedido Pedido? @relation(fields: [pedidoId], references: [id])
 
+  /**
+   * LA defensa contra el doble cobro. Antes lo unico que impedia cobrar dos
+   * veces el mismo pedido era un findFirst adentro de la transaccion, y con
+   * Postgres en READ COMMITTED eso no alcanza: dos confirmaciones concurrentes
+   * del mismo pedido leen "no hay movimiento" las dos y las dos insertan. La
+   * venta terminaba contada dos veces en el resumen.
+   * Es (pedidoId, tipo) y no pedidoId solo por dos razones:
+   * 1. Deja lugar a una SALIDA sobre el mismo pedido (una devolucion) sin
+   * chocar con su ENTRADA, que es lo unico que hay que impedir.
+   * 2. Con `pedidoId` solo, Prisma leeria la relacion como 1-1 y obligaria a
+   * cambiar `Pedido.movimientosCaja` de lista a objeto, rompiendo el
+   * `movimientosCaja: { none: ... }` de pedidos y el `.some(...)` del
+   * front. Sumar `tipo` la mantiene 1-N.
+   * Los movimientos manuales (pedidoId null) no se ven afectados: en Postgres
+   * una UNIQUE con NULL adentro no colisiona nunca (NULLS DISTINCT), asi que
+   * se pueden registrar todos los gastos que haga falta.
+   */
+  @@unique([pedidoId, tipo])
   // La tabla no tenia NINGUN indice. Los dos cubren los dos patrones reales:
   // filtrar solo por fecha (lista de movimientos del Home, "mejor dia" del
   // periodo) y filtrar por tipo dentro de un rango (getResumenAgregado).
@@ -574,6 +652,33 @@ model Configuracion {
   descripcion String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+/**
+ * Horario de atencion, una fila por dia de la semana.
+ * Antes el horario era GLOBAL: dos claves sueltas en "Configuracion"
+ * ('hora_apertura' / 'hora_cierre') que regian de lunes a domingo por igual.
+ * Un local que abre 12:00 los sabados y 19:00 el resto no se podia expresar.
+ * `dia` es 0=Lunes ... 6=Domingo. NO es el indice de Date#getDay (que arranca
+ * en domingo): la conversion es `(getDay() + 6) % 7` y vive en
+ * NegocioConfigService.momentoLocal.
+ * `desde`/`hasta` son "HH:MM" en hora local del negocio (America/Argentina/
+ * Mendoza). Se guardan como texto y no como minutos porque es lo que hablan
+ * los dos extremos: el <input type="time"> del panel y el cartel del menu.
+ * El formato lo garantizan el @Matches del DTO y el regex de la migracion.
+ * CRUZA MEDIANOCHE: cuando `hasta` <= `desde` el turno termina al dia
+ * siguiente (abre 19:00, cierra 00:30). Eso hace que para saber si el local
+ * esta abierto AHORA no alcance con mirar hoy: hay que mirar tambien si sigue
+ * corriendo el turno de ayer. La regla completa esta en
+ * NegocioConfigService.estaAbierto.
+ */
+model HorarioDia {
+  id        String   @id @default(uuid())
+  dia       Int      @unique // 0=Lunes ... 6=Domingo
+  abierto   Boolean  @default(true)
+  desde     String   @db.VarChar(5) // "HH:MM"
+  hasta     String   @db.VarChar(5) // "HH:MM"
+  updatedAt DateTime @updatedAt
 }
 
 model Barrio {

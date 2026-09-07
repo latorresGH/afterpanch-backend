@@ -81,6 +81,16 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
+    // Último ingreso. Se escribe DESPUÉS de validar las credenciales —solo un
+    // login exitoso cuenta— y su fallo no puede tumbar el login: si el UPDATE
+    // falla, el usuario igual entra y lo único que se pierde es un dato
+    // informativo de la pantalla de Personal.
+    //
+    // Va acá y no en el guard a propósito: esto es "inicio de sesión", no
+    // "última actividad". Con un token de 10hs, el segundo significado
+    // escribiría en cada request.
+    await this.usersService.marcarLogin(user.id).catch(() => undefined);
+
     const payload = {
       sub: user.id,
       role: user.role,

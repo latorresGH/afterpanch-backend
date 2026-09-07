@@ -33,11 +33,18 @@ describe('HomeService — GET /admin/home', () => {
       getMovimientosDelRango: jest.fn().mockResolvedValue([]),
     };
     config = {
+      // Misma forma que devuelve `NegocioConfigService.estaAbierto`: el Home
+      // no reinterpreta nada, pasa el objeto tal cual al bloque `local`.
       estaAbierto: jest.fn().mockResolvedValue({
         abierto: true,
         horaApertura: '21:00',
         horaCierre: '23:30',
         horaActual: '22:10',
+        motivo: null,
+        mensajeCierre: null,
+        forzado: false,
+        diaAbierto: true,
+        dia: 3,
       }),
     };
     insumos = { contarBajoMinimo: jest.fn().mockResolvedValue(0) };
@@ -288,6 +295,16 @@ describe('HomeService — GET /admin/home', () => {
       await service.getHome('u-1');
 
     expect(local.abierto).toBe(true);
+    // El Home NO recalcula el horario: lo que muestra el header sale entero de
+    // config.estaAbierto(), incluidos los campos que trajo el horario por dia
+    // (el cierre manual y el motivo). Si algun dia alguien los filtrara aca,
+    // el panel dejaria de poder distinguir "cerrado a mano" de "fuera de hora".
+    expect(local).toMatchObject({
+      horaApertura: '21:00',
+      horaCierre: '23:30',
+      forzado: false,
+      motivo: null,
+    });
     expect(facturacionSemana).toEqual({ dias: [], total: 0, max: 0 });
     expect(movimientosHoy).toEqual([]);
     expect(deliveryPendientesConfirmar.total).toBe(0);

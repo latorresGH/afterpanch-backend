@@ -23,6 +23,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role } from '@prisma/client';
 import { Public } from '../auth/public.decorator';
+import { ToggleActivoAderezoDto } from './dto/toggle-activo.dto';
+import { StockMovAderezoDto } from './dto/stock-mov.dto';
+import { MovimientosQueryDto } from '../insumos/dto/movimientos-query.dto';
+import { UpdateAderezoLegacyDto } from './dto/admin-aderezo.dto';
 
 @ApiTags('Aderezos/Salsas')
 @ApiBearerAuth()
@@ -103,7 +107,8 @@ export class AderezosController {
   @Get('por-categoria-con-stock/:categoriaId')
   @Public()
   @ApiOperation({
-    summary: 'Obtener aderezos disponibles con stock suficiente para una categoría',
+    summary:
+      'Obtener aderezos disponibles con stock suficiente para una categoría',
     description:
       'Retorna aderezos filtrando por categoría y verificando que el stock sea suficiente según el consumo configurado para esa categoría.',
   })
@@ -118,49 +123,84 @@ export class AderezosController {
     return this.aderezosService.findOne(id);
   }
 
+  /**
+   * ⚠️ LOS CUATRO PATCH DE ABAJO RECIBIAN EL BODY COMO TIPO INLINE
+   * (`@Body() dto: { activo: boolean }` y similares). TypeScript borra esos
+   * tipos al compilar, asi que el ValidationPipe global no tenia metadata que
+   * mirar y NO VALIDABA NADA: un body vacio llegaba al service como
+   * `undefined`. Ahora cada uno tiene su DTO de verdad, igual que se hizo en
+   * Insumos.
+   */
   @Patch(':id')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Actualizar aderezo' })
-  update(
-    @Param('id') id: string,
-    @Body() dto: { nombre?: string; stockActual?: number; activo?: boolean; unidadMedida?: string; esGlobal?: boolean; categoriaIds?: string[] },
-  ) {
+  @ApiOperation({
+    summary: 'Actualizar aderezo',
+    description:
+      'Reusa las validaciones del panel: unidad contra la lista blanca, ' +
+      'stockMinimo > 0 y stockActual >= 0. `consumos` NO se acepta por aca ' +
+      '(este endpoint no sabe guardarlo): para el consumo por categoria esta ' +
+      'POST /aderezos/consumo-categoria o, mejor, PATCH /admin/aderezos/:id.',
+  })
+  update(@Param('id') id: string, @Body() dto: UpdateAderezoLegacyDto) {
     return this.aderezosService.update(id, dto);
   }
 
   @Patch(':id/activo')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Cambiar estado activo del aderezo' })
-  setActivo(@Param('id') id: string, @Body() dto: { activo: boolean }) {
+  setActivo(@Param('id') id: string, @Body() dto: ToggleActivoAderezoDto) {
     return this.aderezosService.setActivo(id, dto.activo);
   }
 
+  /**
+   * Ajuste rapido de stock. ESTOS son los que tiene que usar el panel nuevo,
+   * no el PATCH de arriba con `stockActual` absoluto: hacen increment /
+   * decrement ATOMICO en la base y escriben el movimiento, asi que dos ajustes
+   * simultaneos (o un ajuste mientras entra un pedido) no se pisan.
+   */
   @Patch(':id/sumar')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Sumar stock al aderezo' })
-  sumarStock(@Param('id') id: string, @Body() dto: { cantidad: number }) {
-    return this.aderezosService.sumarStock(id, dto.cantidad);
+  @ApiOperation({
+    summary: 'Sumar stock al aderezo (increment atomico)',
+    description: 'Suma sobre el valor actual en la base y deja el movimiento.',
+  })
+  sumarStock(@Param('id') id: string, @Body() dto: StockMovAderezoDto) {
+    return this.aderezosService.sumarStock(id, dto.cantidad, dto.motivo);
   }
 
   @Patch(':id/descontar')
   @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Descontar stock del aderezo' })
-  descontarStock(@Param('id') id: string, @Body() dto: { cantidad: number }) {
-    return this.aderezosService.descontarStock(id, dto.cantidad);
+  @ApiOperation({
+    summary: 'Descontar stock del aderezo (decrement atomico)',
+    description:
+      'Descuenta sobre el valor actual en la base y deja el movimiento. ' +
+      'Rechaza con 400 si no alcanza el stock.',
+  })
+  descontarStock(@Param('id') id: string, @Body() dto: StockMovAderezoDto) {
+    return this.aderezosService.descontarStock(id, dto.cantidad, dto.motivo);
   }
 
   @Get(':id/movimientos')
   @Roles(Role.ADMIN, Role.TRABAJADOR)
-  @ApiOperation({ summary: 'Historial de movimientos de stock' })
-  obtenerMovimientos(@Param('id') id: string, @Query('limit') limit?: string) {
-    return this.aderezosService.obtenerMovimientos(id, limit ? parseInt(limit) : 50);
+  @ApiOperation({
+    summary: 'Historial de movimientos de stock',
+    description: '`limit` clampeado a 1..200 (50 por defecto).',
+  })
+  obtenerMovimientos(
+    @Param('id') id: string,
+    @Query() query: MovimientosQueryDto,
+  ) {
+    return this.aderezosService.obtenerMovimientos(id, query.limit);
   }
 
   @Get('movimientos/recientes')
   @Roles(Role.ADMIN, Role.TRABAJADOR)
-  @ApiOperation({ summary: 'Movimientos recientes de stock' })
-  obtenerMovimientosRecientes(@Query('limit') limit?: string) {
-    return this.aderezosService.obtenerMovimientosRecientes(limit ? parseInt(limit) : 20);
+  @ApiOperation({
+    summary: 'Movimientos recientes de stock',
+    description: '`limit` clampeado a 1..200 (20 por defecto).',
+  })
+  obtenerMovimientosRecientes(@Query() query: MovimientosQueryDto) {
+    return this.aderezosService.obtenerMovimientosRecientes(query.limit);
   }
 
   @Delete(':id')

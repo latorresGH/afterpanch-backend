@@ -51,14 +51,39 @@ export class UsersController {
     return this.users.findOne(id);
   }
 
+  /**
+   * Editar un usuario: nombre, rol, activo y contraseña (reseteo por admin).
+   *
+   * `req.user.sub` se pasa al service como ACTOR. Sin eso no hay forma de
+   * distinguir "desactivar a otro" de "desactivarme a mí mismo", que es la
+   * diferencia entre una acción normal y quedarse afuera del panel. El id sale
+   * del JWT, nunca del body.
+   */
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.users.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+    @Request() req: any,
+  ) {
+    return this.users.update(id, dto, req.user?.sub);
   }
 
+  /**
+   * ⚠️ YA NO BORRA. Desactiva.
+   *
+   * Acá había un `prisma.user.delete()` real. Además de perder el usuario,
+   * `Pedido.repartidor` no declara `onDelete`, así que Prisma aplica
+   * `SetNull`: borrar a un repartidor ponía `repartidorId = null` en todos sus
+   * pedidos históricos, en silencio. Ahora la única acción posible es
+   * desactivar, y la fila nunca se va.
+   *
+   * La RUTA se mantiene porque el panel viejo desplegado la llama; el botón
+   * que decía "borrar definitivamente" ahora desactiva, que es lo que en
+   * realidad se quería hacer.
+   */
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.users.remove(id);
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.users.remove(id, req.user?.sub);
   }
 
   @Get('repartidores/disponibles')

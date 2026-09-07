@@ -4,12 +4,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, TipoMovimientoCaja, EstadoPedido } from '@prisma/client';
+import {
+  Prisma,
+  TipoMovimientoCaja,
+  EstadoPedido,
+  TipoPedido,
+} from '@prisma/client';
 import {
   GrupoMovimientos,
   agruparMovimientos,
   derivarTotales,
 } from './caja.totales';
+import type { RangoResuelto } from './caja.rango';
 
 /**
  * Quien esta registrando el movimiento. Sale SIEMPRE del JWT, nunca del body:
@@ -93,6 +99,22 @@ export class CajaService {
         if (pedido.estado === EstadoPedido.CANCELADO) {
           throw new BadRequestException(
             'No se puede registrar pago de un pedido cancelado',
+          );
+        }
+
+        // Un delivery se cobra cuando llego, no antes. Sin esto un pedido en
+        // preparacion se podia dar por cobrado, y despues ya no se podia
+        // cancelar sin dejar la ENTRADA huerfana en la caja.
+        //
+        // Solo aplica a DELIVERY: un LOCAL o un RETIRO se cobran en el
+        // mostrador y no tienen por que haber pasado por ENTREGADO.
+        if (
+          pedido.tipo === TipoPedido.DELIVERY &&
+          pedido.estado !== EstadoPedido.ENTREGADO
+        ) {
+          throw new BadRequestException(
+            `El pedido todavía no fue entregado (está ${pedido.estado}): ` +
+              'no se puede registrar el cobro hasta que llegue.',
           );
         }
 
@@ -340,22 +362,26 @@ export class CajaService {
     });
   }
 
-  private buildFechaWhere(fechaInicio?: Date, fechaFin?: Date) {
-    const where: any = {};
-    if (fechaInicio || fechaFin) {
-      where.fechaConfirmacion = {};
-      if (fechaInicio) {
-        const inicio = new Date(fechaInicio);
-        inicio.setHours(0, 0, 0, 0);
-        where.fechaConfirmacion.gte = inicio;
-      }
-      if (fechaFin) {
-        const fin = new Date(fechaFin);
-        fin.setHours(23, 59, 59, 999);
-        where.fechaConfirmacion.lte = fin;
-      }
-    }
-    return where;
+  /**
+   * El `where` de un rango YA RESUELTO.
+   *
+   * Antes esta funcion volvia a normalizar las fechas a dia calendario
+   * (`setHours(0,0,0,0)` / `23:59:59.999`) sobre lo que le llegara. Eso hacia
+   * imposible pedir un rango con hora —justo lo que necesita el dia comercial,
+   * que arranca 02:30— y ademas corria un dia los filtros que mandaban una
+   * fecha sola, porque `new Date('2026-09-07')` se interpreta como UTC.
+   *
+   * Ahora el rango llega resuelto desde el controller (`resolverRangoCaja`) y
+   * aca solo se traduce a Prisma, tal cual, sin tocar las puntas.
+   */
+  private whereDelRango(rango?: RangoResuelto) {
+    if (!rango?.inicio && !rango?.fin) return {};
+
+    const fechaConfirmacion: { gte?: Date; lte?: Date } = {};
+    if (rango.inicio) fechaConfirmacion.gte = rango.inicio;
+    if (rango.fin) fechaConfirmacion.lte = rango.fin;
+
+    return { fechaConfirmacion };
   }
 
   /**
@@ -366,8 +392,8 @@ export class CajaService {
    * esta en memoria en vez de pedirle a la base una segunda cuenta. Un solo
    * lugar donde vive la aritmetica, dos formas de alimentarlo.
    */
-  async obtenerResumenCaja(fechaInicio?: Date, fechaFin?: Date) {
-    const where = this.buildFechaWhere(fechaInicio, fechaFin);
+  async obtenerResumenCaja(rango?: RangoResuelto) {
+    const where = this.whereDelRango(rango);
     const movimientos = await this.prisma.cajaMovimiento.findMany({
       where,
       include: {
@@ -400,6 +426,13 @@ export class CajaService {
         ticketsCerrados: totales.ticketsCerrados,
         ticketPromedio: totales.ticketPromedio,
       },
+
+      // Que periodo se aplico de verdad, para que la pantalla muestre el
+      // rango real y no lo vuelva a calcular por su cuenta.
+      periodo: rango?.periodo ?? 'TODO',
+      desde: rango?.inicio ?? null,
+      hasta: rango?.fin ?? null,
+
       movimientos,
     };
   }
@@ -407,10 +440,9 @@ export class CajaService {
   async getHistorialPaginado(
     pagina: number,
     limit: number,
-    fechaInicio?: Date,
-    fechaFin?: Date,
+    rango?: RangoResuelto,
   ) {
-    const where = this.buildFechaWhere(fechaInicio, fechaFin);
+    const where = this.whereDelRango(rango);
     const skip = (pagina - 1) * limit;
 
     const [movimientos, total] = await Promise.all([

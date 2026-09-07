@@ -134,6 +134,52 @@ describe('CajaService', () => {
     });
   });
 
+  describe('un delivery se cobra cuando llegó, no antes', () => {
+    it.each(['PENDIENTE', 'EN_PREPARACION', 'LISTO_PARA_RETIRAR', 'EN_CAMINO'])(
+      'un DELIVERY en %s NO se puede cobrar',
+      async (estado) => {
+        prisma.pedido.findUnique.mockResolvedValue({
+          ...PEDIDO_OK,
+          tipo: 'DELIVERY',
+          estado,
+        });
+
+        await expect(service.registrarPagoPedido('p-1', SOL)).rejects.toThrow(
+          /todavía no fue entregado/,
+        );
+        expect(prisma.cajaMovimiento.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('un DELIVERY ENTREGADO sí se cobra', async () => {
+      prisma.pedido.findUnique.mockResolvedValue({
+        ...PEDIDO_OK,
+        tipo: 'DELIVERY',
+        estado: 'ENTREGADO',
+      });
+
+      const res = await service.registrarPagoPedido('p-1', SOL);
+
+      expect(res.yaExistia).toBe(false);
+      expect(prisma.cajaMovimiento.create).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['LOCAL', 'RETIRO'])(
+      'un %s se sigue cobrando en el mostrador, sin exigir ENTREGADO',
+      async (tipo) => {
+        // El guard es solo para delivery: un pedido de salón se cobra cuando
+        // el cliente paga, no cuando cambia de estado.
+        prisma.pedido.findUnique.mockResolvedValue({
+          ...PEDIDO_OK,
+          tipo,
+          estado: 'EN_PREPARACION',
+        });
+
+        await expect(service.registrarPagoPedido('p-1', SOL)).resolves.toBeDefined();
+      },
+    );
+  });
+
   describe('autoría: siempre del JWT, nunca del body', () => {
     it('el cobro guarda registradoPorId con el id del actor', async () => {
       await service.registrarPagoPedido('p-1', SOL);

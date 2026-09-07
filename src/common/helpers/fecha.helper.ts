@@ -125,3 +125,87 @@ export function claveFecha(fecha: Date): string {
 export function codigoPedido(id: string): string {
   return id.slice(-6);
 }
+
+/**
+ * A que hora "empieza el dia" para la caja.
+ *
+ * El local cierra despues de medianoche: un pedido cobrado a la 01:40 del
+ * domingo es plata del sabado a la noche, no del domingo. Cortar a medianoche
+ * partiria cada noche en dos dias y dejaria el arranque de cada jornada con
+ * las ventas de la anterior encima.
+ *
+ * 02:30 es el corte acordado. No sale de `Configuracion` a proposito: no es
+ * una preferencia por negocio, es la definicion de "hoy" que usa toda la
+ * seccion Caja, y tenerla en un solo lugar es lo que hace que el filtro, el
+ * resumen y el historial hablen del mismo periodo.
+ *
+ * OJO: esto NO es un turno. No hay apertura ni cierre de caja en el sistema
+ * (no existe el modelo); es un corte horario para agrupar, nada mas.
+ */
+export const CORTE_DIA_COMERCIAL = { hora: 2, minuto: 30 } as const;
+
+/**
+ * El 02:30 que abre el dia comercial que contiene a `ahora`.
+ *
+ * A las 23:00 del lunes devuelve el lunes 02:30. A la 01:00 del martes
+ * devuelve *tambien* el lunes 02:30, porque esa hora todavia es parte de la
+ * noche del lunes.
+ */
+export function inicioDiaComercial(ahora: Date = new Date()): Date {
+  const inicio = new Date(ahora);
+  inicio.setHours(CORTE_DIA_COMERCIAL.hora, CORTE_DIA_COMERCIAL.minuto, 0, 0);
+
+  // Antes del corte todavia estamos en la jornada que arranco ayer.
+  if (ahora.getTime() < inicio.getTime()) {
+    inicio.setDate(inicio.getDate() - 1);
+  }
+
+  return inicio;
+}
+
+/**
+ * Los dos extremos de un dia comercial, con `desplazamiento` en jornadas
+ * hacia atras: 0 es el dia en curso, 1 el anterior.
+ *
+ * El fin es un milisegundo antes del corte siguiente, no el corte mismo: los
+ * dias comerciales quedan contiguos y no se pisan ni dejan un hueco, asi que
+ * un movimiento cae en exactamente uno. Se avanza con `setDate` y no sumando
+ * 24hs para que un cambio de horario de verano no corra el corte.
+ */
+export function rangoDiaComercial(
+  ahora: Date = new Date(),
+  desplazamiento = 0,
+): { inicio: Date; fin: Date } {
+  const inicio = inicioDiaComercial(ahora);
+  inicio.setDate(inicio.getDate() - desplazamiento);
+
+  const siguiente = new Date(inicio);
+  siguiente.setDate(siguiente.getDate() + 1);
+
+  return { inicio, fin: new Date(siguiente.getTime() - 1) };
+}
+
+/** Los periodos que entiende la seccion Caja. */
+export const PERIODOS_CAJA = ['HOY', 'AYER'] as const;
+export type PeriodoCaja = (typeof PERIODOS_CAJA)[number];
+
+export function esPeriodoCaja(valor: unknown): valor is PeriodoCaja {
+  return (
+    typeof valor === 'string' &&
+    (PERIODOS_CAJA as readonly string[]).includes(valor.toUpperCase())
+  );
+}
+
+/**
+ * `HOY` / `AYER` a un rango concreto, con el corte de las 02:30.
+ *
+ * Es la unica traduccion de periodo a fechas del sistema: el frontend manda el
+ * nombre del periodo y no las fechas, para que el corte no quede escrito en
+ * dos lugares que despues se desincronizan.
+ */
+export function rangoPeriodoCaja(
+  periodo: PeriodoCaja,
+  ahora: Date = new Date(),
+): { inicio: Date; fin: Date } {
+  return rangoDiaComercial(ahora, periodo === 'AYER' ? 1 : 0);
+}

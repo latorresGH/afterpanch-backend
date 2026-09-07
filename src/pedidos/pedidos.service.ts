@@ -26,6 +26,7 @@ import { OfertasCalculatorService } from '../ofertas/ofertas-calculator.service'
 import { NegocioConfigService } from '../config/config.service';
 import { PedidosGateway } from './pedidos.gateway';
 import { tieneAccesoTracking } from './tracking.util';
+import { MAX_CONFIRMAR_LOTE } from '../caja/dto/confirmar-lote.dto';
 
 const ESTADOS_ABIERTOS: EstadoPedido[] = [
   EstadoPedido.PENDIENTE,
@@ -1202,11 +1203,15 @@ export class PedidosService {
   async getDeliveryPendientesConfirmar(limite = 3) {
     const where = {
       tipo: TipoPedidoDto.DELIVERY,
-      estado: { not: EstadoPedido.CANCELADO },
+      // ENTREGADO y no "cualquiera menos CANCELADO": antes un delivery que
+      // todavia se estaba cocinando aparecia como "pendiente de cobro" y el
+      // boton lo daba por cobrado. La plata de un pedido que no salio del
+      // local no entro a la caja.
+      estado: EstadoPedido.ENTREGADO,
       movimientosCaja: { none: { tipo: TipoMovimientoCaja.ENTRADA } },
     };
 
-    const [agregado, items] = await Promise.all([
+    const [agregado, items, pendientes] = await Promise.all([
       this.prisma.pedido.aggregate({
         where,
         _count: { _all: true },
@@ -1226,11 +1231,23 @@ export class PedidosService {
         orderBy: { createdAt: 'asc' },
         take: limite,
       }),
+      // Los ids de TODOS los pendientes, no solo los de las filas visibles:
+      // "Confirmar todos" tiene que confirmar todos. Se acotan al tope que
+      // acepta el endpoint de lote (`ConfirmarLoteDto` valida 50), asi que con
+      // mas de 50 pendientes el boton confirma los 50 mas viejos y la pantalla
+      // avisa cuantos quedan. Es un `select` de una sola columna indexada.
+      this.prisma.pedido.findMany({
+        where,
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+        take: MAX_CONFIRMAR_LOTE,
+      }),
     ]);
 
     return {
       total: agregado._count._all,
       montoTotal: (agregado._sum.total ?? 0) + (agregado._sum.costoEnvio ?? 0),
+      idsPendientes: pendientes.map((p) => p.id),
       items: items.map((p) => ({
         ...p,
         codigo: codigoPedido(p.id),

@@ -21,6 +21,7 @@ import {
   MovimientoManualDto,
 } from './dto/confirmar-pago.dto';
 import { ConfirmarLoteDto } from './dto/confirmar-lote.dto';
+import { resolverRangoCaja } from './caja.rango';
 
 /**
  * Quien esta escribiendo en la caja, sacado del JWT y de ningun otro lado.
@@ -108,34 +109,38 @@ export class CajaController {
     description:
       'Devuelve el balance de caja con totales de entradas, salidas, ganancias ' +
       'negocio y repartidor. Los totales salen de la misma función que usa el ' +
-      'Home, así que para el mismo rango dan exactamente los mismos números.',
+      'Home, así que para el mismo rango dan exactamente los mismos números. ' +
+      'Acepta `?periodo=HOY|AYER` (día comercial con corte a las 02:30) o un ' +
+      '`fechaInicio`/`fechaFin` a mano; `periodo` gana si vienen los dos.',
   })
   obtenerResumen(
+    @Query('periodo') periodo?: string,
     @Query('fechaInicio') fechaInicio?: string,
     @Query('fechaFin') fechaFin?: string,
   ) {
-    const inicio = fechaInicio ? new Date(fechaInicio) : undefined;
-    const fin = fechaFin ? new Date(fechaFin) : undefined;
-    return this.cajaService.obtenerResumenCaja(inicio, fin);
+    const rango = resolverRangoCaja({ periodo, fechaInicio, fechaFin });
+    return this.cajaService.obtenerResumenCaja(rango);
   }
 
   @Get('historial')
   @ApiOperation({
     summary: 'Historial de movimientos paginado',
     description:
-      'Devuelve movimientos de caja paginados. Exclusivo para el panel admin. No afecta /caja/resumen.',
+      'Devuelve movimientos de caja paginados. Acepta el mismo `?periodo=HOY|AYER` ' +
+      'que /caja/resumen, así que el historial y el resumen hablan siempre del ' +
+      'mismo período.',
   })
   getHistorial(
     @Query('pagina') pagina?: string,
     @Query('limit') limit?: string,
+    @Query('periodo') periodo?: string,
     @Query('fechaInicio') fechaInicio?: string,
     @Query('fechaFin') fechaFin?: string,
   ) {
     const p = Math.max(1, parseInt(pagina ?? '1', 10) || 1);
     const l = Math.min(100, Math.max(1, parseInt(limit ?? '20', 10) || 20));
-    const inicio = fechaInicio ? new Date(fechaInicio) : undefined;
-    const fin = fechaFin ? new Date(fechaFin) : undefined;
-    return this.cajaService.getHistorialPaginado(p, l, inicio, fin);
+    const rango = resolverRangoCaja({ periodo, fechaInicio, fechaFin });
+    return this.cajaService.getHistorialPaginado(p, l, rango);
   }
 
   @Get('pedido/:pedidoId')
